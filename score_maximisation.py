@@ -104,7 +104,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
             mask = np.where(probas > 0)[0]
             input = probas[mask][sort]
             topk[sort[Ktopk]] = 1
-            Ut_topk2 += func(topk,tar, **kwargs)
+            Ut_topk2 += score(topk,tar,func, **kwargs)
         Ktopk += 1
 
     # Global threshold
@@ -125,8 +125,9 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
                 mask = np.where(probas > 0)[0]
                 input = probas[mask][sort]
                 Kth = threshold(input, th = th)
-                topk[sort[:Kth]] = 1
-                Ut_th2 += func(topk,tar, **kwargs)
+                nth = np.zeros(N)
+                nth[sort[:Kth]] = 1
+                Ut_th2 += score(nth,tar,func, **kwargs)
         th = th + e
         e /= 10
 
@@ -158,41 +159,41 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
         K, _ = max_func(input, func, kwargs)
         pred = np.zeros(N).astype(np.intp)
         pred[sort[:K]] = 1
-        U = func(pred,tar, **kwargs)
+        U = score(pred,tar,func, **kwargs)
 
         
         Ktopk = 8
         topk = np.zeros(N)
         topk[sort[:Ktopk]] = 1
-        U_topk = func(topk,tar, **kwargs)
+        U_topk = score(topk,tar,func, **kwargs)
     
         K0_5 = threshold(input, th = 0.5)
         n0_5 = np.zeros(N)
         n0_5[sort[:K0_5]] = 1
-        U_0_5 = func(n0_5,tar, **kwargs)
+        U_0_5 = score(n0_5,tar,func, **kwargs)
 
         th  = 0.5
         Kth = threshold(input, th)
         nth = np.zeros(N)
         nth[sort[:Kth]] = 1
-        U_th = func(nth,tar, **kwargs)
+        U_th = score(nth,tar,func, **kwargs)
 
         thlow = 0.1
         Klow = threshold(input, thlow)
         nlow = np.zeros(N)
         nlow[sort[:Klow]] = 1
-        U_low = func(nlow,tar, **kwargs)
+        U_low = score(nlow,tar,func, **kwargs)
 
         th5pc = 0.1
         K5pc = threshold(input, th5pc)
         n5pc = np.zeros(N)
         n5pc[sort[:K5pc]] = 1
-        U_5pc = func(n5pc,tar, **kwargs)
+        U_5pc = score(n5pc,tar,func, **kwargs)
 
         Ksum = sum_th(input)
         nsum = np.zeros(N)
         nsum[sort[:Ksum]] = 1
-        U_sum = func(nsum,tar, **kwargs)  
+        U_sum = score(nsum,tar,func, **kwargs)
 
         KLIST[i] = np.array([K, Ktopk, K0_5, Kth, Klow, K5pc, Ksum])
         SCORE[i] = np.array([U, U_topk, U_0_5, U_th, U_low, U_5pc, U_sum])
@@ -215,9 +216,9 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     return KLIST, OUTPUT
  
 
-def main(pval = 0.5):
-    sol_file = 'sol_file_test.csv'
-    pred_file = 'pred_file_test.csv'
+def main(pval = 0.2):
+    sol_file = 'data/hmsc_test_species.csv'
+    pred_file = 'data/hmsc_test_probas.csv'
     tcalib_file = 'sol_file_test.csv'
     pcalib_file = 'pred_file_test.csv'
 
@@ -249,7 +250,6 @@ def main(pval = 0.5):
     S = len(sol)
     ST = len(tcalib)
     N = len(PROBAS[0])
-    N = 9
 
     SOL = np.zeros((S,N), dtype = np.intp)
     for i in range(S) :
