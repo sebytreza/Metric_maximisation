@@ -9,28 +9,26 @@ from time import perf_counter
 
 ## SCORE CALCULATION BASED ON SET VALUE METRICS ##
 @numba.jit(fastmath=True, nogil=True, parallel = True)
-def score(pred,target, func, kwargs = {} ):
+def score(pred,target, func, args):
     VP = np.sum(np.logical_and(pred,target))
     FP = np.sum(pred) - VP
     FN = np.sum(target) - VP
     TN = len(pred) - VP - FP - FN
-    return func(VP, FP, TN, FN, **kwargs)
+    return func(VP, FP, TN, FN, args)
 
 ## DEFINE OF UTILITY FUNCTIONS ##
 @numba.njit(fastmath=True, nogil=True)
-def f_b(TP, FP, TN, FN, **kwargs):
-    b = kwargs.get('b', 1)
+def f_b(TP, FP, TN, FN, args = [1]):
+    b = args[0]
     return (1+b**2)*TP/((1+b**2)*TP + b*FN + FP)
 
 @numba.njit(fastmath=True, nogil=True)
-def jaccard(TP, FP, TN, FN, **kwargs):
+def jaccard(TP, FP, TN, FN, args = []):
     return TP/(TP + FP + FN)
 
 ## MAXIMIZATION OF THE SCORE ##
 @numba.njit(fastmath=True, nogil=True, parallel = True)
-def max_func(p, **kwargs):
-    func = kwargs.get('func', f_b)
-    kwargs = kwargs.get('kwargs')
+def max_func(p, func, args):
 
     n = len(p)
     Umax, kmax, U  = 0, 0, 0
@@ -50,10 +48,10 @@ def max_func(p, **kwargs):
 
     K = 1
     while K < n and Umax == U:
-        U = 0
+        U = 0.
         for i in range(K+1):
             for j in range(n - K + 1):
-                U += C[K,i]*S[n-K,j]*func(i, K -i, n-K-j, j, **kwargs) #func(tp,fp,tn, fn)
+                U += C[K,i]*S[n-K,j]*func(i, K -i, n-K-j, j, args) #func(tp,fp,tn, fn)
             
         if U >= Umax :
             Umax, kmax  = U, K
@@ -62,15 +60,14 @@ def max_func(p, **kwargs):
 
 ## BASELINE STRATEGIES ##
 @numba.njit(fastmath=True, nogil=True)
-def threshold(p, **kwargs) :
-    th  = kwargs.get('th', 0.5)
+def threshold(p, th = 0.5) :
     K = 0
-    while p[K] >= th and K < len(p):
+    while  K < len(p) and p[K] >= th:
         K += 1
     return K+1
 
 @numba.njit(fastmath=True, nogil=True)
-def sum_th(p, **kwargs) :
+def sum_th(p) :
     return int(np.sum(p)) + 1
 
 @numba.njit(fastmath=True, nogil = True, parallel=True)
@@ -80,12 +77,12 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     ST = len(T_CALIB)
 
     func = f_b
-    kwargs = {'b': 1}
+    args = [1]
 
     SCORE = np.zeros((S, 7))
     KLIST = np.zeros((S, 7))
 
-    OUTPUT = None
+    OUTPUT = []
 
     # Calibrate strategies on the given data #
     
@@ -102,10 +99,11 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
             tar = T_CALIB[i]
             sort = np.argsort(-probas)
             mask = np.where(probas > 0)[0]
-            input = probas[mask][sort]
+            input = probas[sort][mask]
             topk[sort[Ktopk]] = 1
-            Ut_topk2 += score(topk,tar,func, **kwargs)
+            Ut_topk2 += score(topk,tar,func, args)
         Ktopk += 1
+
 
     # Global threshold
     th = 1.
@@ -123,11 +121,11 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
                 tar = T_CALIB[i]
                 sort = np.argsort(-probas)
                 mask = np.where(probas > 0)[0]
-                input = probas[mask][sort]
+                input = probas[sort][mask]
                 Kth = threshold(input, th = th)
                 nth = np.zeros(N)
                 nth[sort[:Kth]] = 1
-                Ut_th2 += score(nth,tar,func, **kwargs)
+                Ut_th2 += score(nth,tar,func, args)
         th = th + e
         e /= 10
 
@@ -141,10 +139,12 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     # 5% threshold
     th5pc = np.ones(N)
     for i in range(N):
-        th5pc[i] = np.percentile(P_CALIB[np.where(T_CALIB[:,i]),i], 5)
+        occ = np.where(T_CALIB[:,i] == 1)[0]
+        if len(occ) > 0:
+            th5pc[i] = np.percentile(P_CALIB[occ,i], 5)
+        else:
+            th5pc[i] = 1
 
-    del P_CALIB
-    del T_CALIB 
 
     # Iterate throught the dataset #
     for i in range(S):
@@ -154,79 +154,69 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
         
         sort = np.argsort(-probas)
         mask = np.where(input > 0)[0] #clip species with null probability
-        input = probas[mask][sort]
+        input = probas[sort][mask]
 
-        K, _ = max_func(input, func, kwargs)
+        K, _ = max_func(input, func, args)
         pred = np.zeros(N).astype(np.intp)
         pred[sort[:K]] = 1
-        U = score(pred,tar,func, **kwargs)
+        U = score(pred,tar,func, args)
 
         
-        Ktopk = 8
         topk = np.zeros(N)
         topk[sort[:Ktopk]] = 1
-        U_topk = score(topk,tar,func, **kwargs)
+        U_topk = score(topk,tar,func, args)
     
         K0_5 = threshold(input, th = 0.5)
         n0_5 = np.zeros(N)
         n0_5[sort[:K0_5]] = 1
-        U_0_5 = score(n0_5,tar,func, **kwargs)
+        U_0_5 = score(n0_5,tar,func, args)
 
-        th  = 0.5
         Kth = threshold(input, th)
         nth = np.zeros(N)
         nth[sort[:Kth]] = 1
-        U_th = score(nth,tar,func, **kwargs)
+        U_th = score(nth,tar,func, args)
 
-        thlow = 0.1
-        Klow = threshold(input, thlow)
-        nlow = np.zeros(N)
-        nlow[sort[:Klow]] = 1
-        U_low = score(nlow,tar,func, **kwargs)
+        nlow = probas[sort] > thlow
+        Klow = np.sum(nlow)
+        U_low = score(nlow,tar,func, args)
 
-        th5pc = 0.1
-        K5pc = threshold(input, th5pc)
-        n5pc = np.zeros(N)
-        n5pc[sort[:K5pc]] = 1
-        U_5pc = score(n5pc,tar,func, **kwargs)
+        n5pc = probas[sort] > th5pc
+        K5pc = np.sum(n5pc)
+        U_5pc = score(n5pc,tar,func, args)
 
         Ksum = sum_th(input)
         nsum = np.zeros(N)
         nsum[sort[:Ksum]] = 1
-        U_sum = score(nsum,tar,func, **kwargs)
+        U_sum = score(nsum,tar,func, args)
 
         KLIST[i] = np.array([K, Ktopk, K0_5, Kth, Klow, K5pc, Ksum])
         SCORE[i] = np.array([U, U_topk, U_0_5, U_th, U_low, U_5pc, U_sum])
 
-        output = np.where(pred == 1)
 
-        if OUTPUT is None:
-            OUTPUT = output
-        else:
-            OUTPUT = np.vstack((OUTPUT, output))
+        OUTPUT.append(sort[:K])
 
-    print("Maximization :" + np.mean(U[:,0]))
-    print("Topk         :" + np.mean(U_topk[:,1]))
-    print("Th_0.5       :" + np.mean(U_0_5[:,2]))
-    print("Th_opti      :" + np.mean(U_th[:,3]))
-    print("Th_lowest    :" + np.mean(U_low[:,4]))
-    print("Th_5%        :" + np.mean(U_5pc[:,5]))
-    print("Sum          :" + np.mean(U_sum[:,6]))
+    print("Maximization :" , np.mean(SCORE[:,0]))
+    print("Topk         :" , np.mean(SCORE[:,1]))
+    print("Th_0.5       :" , np.mean(SCORE[:,2]))
+    print("Th_opti      :" , np.mean(SCORE[:,3]))
+    print("Th_lowest    :" , np.mean(SCORE[:,4]))
+    print("Th_5%        :" , np.mean(SCORE[:,5]))
+    print("Sum          :" , np.mean(SCORE[:,6]))
 
     return KLIST, OUTPUT
  
 
 def main(pval = 0.2):
-    sol_file = 'data/hmsc_test_species.csv'
-    pred_file = 'data/hmsc_test_probas.csv'
+    sol_file = 'data_examples/hmsc_test_species.csv'
+    pred_file = 'data_examples/hmsc_test_probas.csv'
     tcalib_file = 'sol_file_test.csv'
     pcalib_file = 'pred_file_test.csv'
 
     sol = p.read_csv(sol_file)
     probas = p.read_csv(pred_file, delimiter = ',')
     probas = probas.join(sol.set_index('surveyId'), on='surveyId')
-    surveys = probas['surveyId']
     probas = probas.dropna()
+    surveys = probas['surveyId']
     sol = probas['speciesId'].to_numpy(dtype=str)
     PROBAS = probas.drop(columns = ['surveyId', 'speciesId']).to_numpy(dtype=np.float32)
     del probas
@@ -245,6 +235,7 @@ def main(pval = 0.2):
         P_CALIB = PROBAS[pick]
         PROBAS = np.delete(PROBAS, pick, axis = 0)
         sol = np.delete(sol, pick, axis = 0)
+        surveys = np.delete(surveys, pick, axis = 0)
 
 
     S = len(sol)
@@ -267,10 +258,11 @@ def main(pval = 0.2):
     _, output = iterate(SOL, PROBAS, P_CALIB, T_CALIB)
 
     data_concatenated = [' '.join(map(str, row)) for row in output]
+
     p.DataFrame(
         {'surveyId': surveys,
         'speciesId': data_concatenated,
-        }).to_csv("binary_predictions.csv", index = False)
+        }).to_csv("submissions/binary_predictions.csv", index = False)
 
 
 if __name__ == "__main__":
