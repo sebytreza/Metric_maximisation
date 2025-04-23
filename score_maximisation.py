@@ -22,7 +22,7 @@ def f_b(TP, FP, TN, FN, args = [1]):
     b = args[0]
     return (1+b**2)*TP/((1+b**2)*TP + b*FN + FP)
 
-@numba.njit(fastmath=True, nogil=True)
+@numba.njit(fastmath=True, nogil=True, parallel = True)
 def jaccard(TP, FP, TN, FN, args = []):
     return TP/(TP + FP + FN)
 
@@ -64,18 +64,21 @@ def threshold(p, th = 0.5) :
     K = 0
     while  K < len(p) and p[K] >= th:
         K += 1
-    return K+1
+    return K
 
-@numba.njit(fastmath=True, nogil=True)
+@numba.njit(fastmath=True, nogil=True, parallel = True)
 def sum_th(p) :
     return int(np.sum(p)) + 1
 
-@numba.njit(fastmath=True, nogil = True, parallel=True)
+
+## APPLY DECISION FUNCTIONS TO EACH SITES ##
+@numba.njit(fastmath=True, nogil = True)
 def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     S = len(SOL)
     N = len(SOL[0])
     ST = len(T_CALIB)
 
+    # define the utility function and its arguments
     func = f_b
     args = [1]
 
@@ -88,27 +91,31 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     
     # TopK
     Ktopk = 0
-    Ut_topk = 0.
-    Ut_topk2 = 0.
-    topk = np.zeros(N)
-    while Ut_topk2 >= Ut_topk:
-        Ut_topk = Ut_topk2
-        Ut_topk2 = 0.
+    Ut_topkmax = 0.
+    Ktopkmax = 0
+
+    while Ktopk < N:
+        Ut_topk = 0.
         for i in range(ST):
             probas = P_CALIB[i]
             tar = T_CALIB[i]
             sort = np.argsort(-probas)
             mask = np.where(probas > 0)[0]
             input = probas[sort][mask]
-            topk[sort[Ktopk]] = 1
-            Ut_topk2 += score(topk,tar,func, args)
+            topk = np.zeros(N)
+            topk[sort[:Ktopk+1]] = 1
+            Ut_topk += score(topk,tar,func, args)
+        if Ut_topk >= Ut_topkmax:
+            Ut_topkmax = Ut_topk
+            Ktopkmax = Ktopk
         Ktopk += 1
 
+    Ktopk = Ktopkmax +1
 
     # Global threshold
     th = 1.
     e = 0.1
-    emax = 0.01
+    emax = 0.001
     while e >= emax:
         Ut_th = 0.
         Ut_th2 = 0.
@@ -146,8 +153,9 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
             th5pc[i] = 1
 
 
+    
     # Iterate throught the dataset #
-    for i in range(S):
+    for i in numba.prange(S):
 
         probas = PROBAS[i]
         tar = SOL[i]
@@ -206,7 +214,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     return KLIST, OUTPUT
  
 
-def main(pval = 0.2):
+def main(pval = 0.2): #percentage of testset used for calibration (0% = use trainset)
     sol_file = 'data_examples/hmsc_test_species.csv'
     pred_file = 'data_examples/hmsc_test_probas.csv'
     tcalib_file = 'sol_file_test.csv'
@@ -255,7 +263,7 @@ def main(pval = 0.2):
             T_CALIB[i,int(id)] = 1
     del tcalib
 
-    _, output = iterate(SOL, PROBAS, P_CALIB, T_CALIB)
+    _ , output = iterate(SOL, PROBAS, P_CALIB, T_CALIB)
 
     data_concatenated = [' '.join(map(str, row)) for row in output]
 
