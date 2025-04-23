@@ -88,13 +88,21 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     OUTPUT = []
 
     # Calibrate strategies on the given data #
-    
+
+    print('BEGIN CALIBRATION')
     # TopK
     Ktopk = 0
     Ut_topkmax = 0.
     Ktopkmax = 0
 
-    while Ktopk < N:
+    upper_bound = 30
+
+    upper_bound = min(upper_bound, N)
+    if upper_bound > 100:
+        print('WARNING: Topk calibration for many species may take a long time ...  \n' \
+        'Consider changing the upper bound of the calibration')
+    
+    while Ktopk < upper_bound : #adapt upper bound if too many species
         Ut_topk = 0.
         for i in range(ST):
             probas = P_CALIB[i]
@@ -111,6 +119,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
         Ktopk += 1
 
     Ktopk = Ktopkmax +1
+    print('Topk done')
 
     # Global threshold
     th = 1.
@@ -135,6 +144,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
                 Ut_th2 += score(nth,tar,func, args)
         th = th + e
         e /= 10
+    print('Global threshold done')
 
     # Low threshold
     thlow = np.ones(N)
@@ -142,6 +152,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
         for j in range(ST):
             if T_CALIB[j,i] == 1:
                 thlow[i] = min(thlow[i], P_CALIB[j,i])
+    print('Low threshold done')
 
     # 5% threshold
     th5pc = np.ones(N)
@@ -151,9 +162,12 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
             th5pc[i] = np.percentile(P_CALIB[occ,i], 5)
         else:
             th5pc[i] = 1
+    print('5% threshold done')
 
 
-    
+    print('CALIBRATION DONE')
+    print('BEGIN BINARY PREDICTIONS')
+
     # Iterate throught the dataset #
     for i in numba.prange(S):
 
@@ -214,12 +228,16 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     return KLIST, OUTPUT
  
 
-def main(pval = 0.2): #percentage of testset used for calibration (0% = use trainset)
-    sol_file = 'data_examples/hmsc_test_species.csv'
-    pred_file = 'data_examples/hmsc_test_probas.csv'
-    tcalib_file = 'sol_file_test.csv'
-    pcalib_file = 'pred_file_test.csv'
+def main(pval = 0.): #percentage of testset used for calibration (0% = use trainset)
 
+    ## DEFINE FILE PATH ##
+    sol_file = 'data/GLC24_SOLUTION_FILE.csv' # test true species vector
+    pred_file = 'data/GeoLifeCLEF_probas.csv' # test predicted probabilities
+    tcalib_file = 'data/GeoLifeCLEF_tcalib.csv' # train true species vector (not used if pval > 0)
+    pcalib_file = 'data/GeoLifeCLEF_pcalib.csv' # train predicted probabilities (not used if pval > 0)
+
+
+    ## LOAD DATA ##
     sol = p.read_csv(sol_file)
     probas = p.read_csv(pred_file, delimiter = ',')
     probas = probas.join(sol.set_index('surveyId'), on='surveyId')
@@ -274,4 +292,5 @@ def main(pval = 0.2): #percentage of testset used for calibration (0% = use trai
 
 
 if __name__ == "__main__":
+    
     main()
