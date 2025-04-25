@@ -83,7 +83,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     args = [1]
 
     SCORE = np.zeros((S, 7))
-    KLIST = np.zeros((S, 7))
+    KLIST = np.zeros((S, 8))
 
     OUTPUT = []
 
@@ -95,7 +95,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     Ut_topkmax = 0.
     Ktopkmax = 0
 
-    upper_bound = 30
+    upper_bound = 80
 
     upper_bound = min(upper_bound, N)
     if upper_bound > 100:
@@ -122,28 +122,28 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     print('Topk done')
 
     # Global threshold
-    th = 1.
-    e = 0.1
-    emax = 0.001
-    while e >= emax:
+    e = 0.01
+    th = 1
+    thmax = 1
+    Uth_max = 0.
+    while th >= 0:
         Ut_th = 0.
-        Ut_th2 = 0.
-        while Ut_th2 >= Ut_th :
-            th = th - e
-            Ut_th = Ut_th2
-            Ut_th2 = 0.
-            for i in range(ST):
-                probas = P_CALIB[i]
-                tar = T_CALIB[i]
-                sort = np.argsort(-probas)
-                mask = np.where(probas > 0)[0]
-                input = probas[sort][mask]
-                Kth = threshold(input, th = th)
-                nth = np.zeros(N)
-                nth[sort[:Kth]] = 1
-                Ut_th2 += score(nth,tar,func, args)
-        th = th + e
-        e /= 10
+        for i in range(ST):
+            probas = P_CALIB[i]
+            tar = T_CALIB[i]
+            sort = np.argsort(-probas)
+            mask = np.where(probas > 0)[0]
+            input = probas[sort][mask]
+            Kth = threshold(input, th = th)
+            nth = np.zeros(N)
+            nth[sort[:Kth]] = 1
+            Ut_th += score(nth,tar,func, args)
+        if Ut_th >= Uth_max:
+            Uth_max = Ut_th
+            thmax = th
+        th = th - e
+    
+    th = thmax
     print('Global threshold done')
 
     # Low threshold
@@ -175,7 +175,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
         tar = SOL[i]
         
         sort = np.argsort(-probas)
-        mask = np.where(input > 0)[0] #clip species with null probability
+        mask = np.where(input > 0.0)[0] #clip species with null probability
         input = probas[sort][mask]
 
         K, _ = max_func(input, func, args)
@@ -211,7 +211,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
         nsum[sort[:Ksum]] = 1
         U_sum = score(nsum,tar,func, args)
 
-        KLIST[i] = np.array([K, Ktopk, K0_5, Kth, Klow, K5pc, Ksum])
+        KLIST[i] = np.array([K, Ktopk, K0_5, Kth, Klow, K5pc, Ksum, np.sum(tar)])
         SCORE[i] = np.array([U, U_topk, U_0_5, U_th, U_low, U_5pc, U_sum])
 
 
@@ -225,14 +225,14 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     print("Th_5%        :" , np.mean(SCORE[:,5]))
     print("Sum          :" , np.mean(SCORE[:,6]))
 
-    return KLIST, OUTPUT
+    return OUTPUT, KLIST,SCORE
  
 
-def main(pval = 0.): #percentage of testset used for calibration (0% = use trainset)
+def main(pval = 0.3): #percentage of testset used for calibration (0% = use trainset)
 
     ## DEFINE FILE PATH ##
-    sol_file = 'data/GLC24_SOLUTION_FILE.csv' # test true species vector
-    pred_file = 'data/GeoLifeCLEF_probas.csv' # test predicted probabilities
+    sol_file = 'data_examples/hmsc_test_species.csv' # test true species vector
+    pred_file = 'data_examples/hmsc_test_probas.csv' # test predicted probabilities
     tcalib_file = 'data/GeoLifeCLEF_tcalib.csv' # train true species vector (not used if pval > 0)
     pcalib_file = 'data/GeoLifeCLEF_pcalib.csv' # train predicted probabilities (not used if pval > 0)
 
@@ -281,7 +281,7 @@ def main(pval = 0.): #percentage of testset used for calibration (0% = use train
             T_CALIB[i,int(id)] = 1
     del tcalib
 
-    _ , output = iterate(SOL, PROBAS, P_CALIB, T_CALIB)
+    output, nb_species , score = iterate(SOL, PROBAS, P_CALIB, T_CALIB)
 
     data_concatenated = [' '.join(map(str, row)) for row in output]
 
@@ -289,8 +289,17 @@ def main(pval = 0.): #percentage of testset used for calibration (0% = use train
         {'surveyId': surveys,
         'speciesId': data_concatenated,
         }).to_csv("submissions/binary_predictions.csv", index = False)
+    
+    p.DataFrame(
+        score, 
+        columns=['max', 'topk', 'th_0.5', 'th_opti', 'th_lowest', 'th_5%', 'sum']
+        ).to_csv("submissions/score_distrib.csv", index = False)
+
+    p.DataFrame(
+        nb_species, 
+        columns=['max', 'topk', 'th_0.5', 'th_opti', 'th_lowest', 'th_5%', 'sum','true']
+        ).to_csv("submissions/nb_species.csv", index = False)
 
 
 if __name__ == "__main__":
-    
     main()
