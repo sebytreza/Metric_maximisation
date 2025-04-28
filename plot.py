@@ -2,13 +2,23 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as p
 import seaborn as sb
+from scipy import stats
 
+
+
+def run_wmw_test():
+    score = p.read_csv("submissions/score_distrib.csv")
+    names = score.columns
+    for i in range(1, len(score.columns)):
+        wmw, pvalue = stats.mannwhitneyu(score.iloc[:,0], score.iloc[:,i], alternative='greater')
+        print(f"{names[0]} vs {names[i]}: WMW = {wmw}, p-value = {pvalue}")
+
+run_wmw_test()
 
 def plot_score_distribution():
     title="Score Distribution"
     xlabel="Decision functions"
     ylabel="Score"
-
     score  = p.read_csv("submissions/score_distrib.csv")
 
     plt.figure(figsize=(10, 6))
@@ -46,11 +56,11 @@ def plot_calibration_curve():
     sol_file = "data_examples/hmsc_test_species.csv"
     pred_file = "data_examples/hmsc_test_probas.csv"
 
-    sol_file = 'data/GeoLifeCLEF_species.csv'
-    pred_file = 'data/GeoLifeCLEF_probas.csv'
+    sol_file = 'data/birds_study_species.csv'
+    pred_file = 'data/birds_study_probas.csv'
 
     sol = p.read_csv(sol_file)
-    probas = p.read_csv(pred_file, delimiter = ',')
+    probas = p.read_csv(pred_file)
     probas = probas.join(sol.set_index('surveyId'), on='surveyId')
     probas = probas.dropna()
     sol = probas['speciesId'].to_numpy(dtype=str)
@@ -69,14 +79,21 @@ def plot_calibration_curve():
     Y = []
     X = []
     sY = []
+    sp_freq = [SOL[:,i].mean() for i in range(N)]
+    d_freq = np.zeros_like(bins)
     for bin in bins:
         idx = np.where((PROBAS >= bin)*(PROBAS < bin+dp))
+        for id in idx:
+            d_freq[int(bin/dp)] += sp_freq[id[1]]
+        d_freq[int(bin/dp)] /= len(idx)
+            
         if len(idx[0]!= 0) :
             Y.append(np.mean(SOL[idx]))
             sY.append(np.std(SOL[idx])/np.sqrt(len(idx[0])))
             X.append(np.mean(PROBAS[idx]))
     X, Y, sY = np.array(X), np.array(Y), np.array(sY)
     plt.figure(figsize=(10, 6))
+    plt.plot(X,d_freq, c = 'cyan', linewidth = 0.5)
     plt.scatter(X,Y, c = 'orange')
     plt.plot(X,Y, c = 'orange', linewidth = 1)
     plt.plot(X,Y + 3*sY,'--',c = 'orange', linewidth = 0.5)

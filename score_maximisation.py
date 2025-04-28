@@ -6,6 +6,9 @@ from numba import cuda
 from tqdm import tqdm
 import math
 from time import perf_counter
+import random
+
+random.seed(42)
 
 ## SCORE CALCULATION BASED ON SET VALUE METRICS ##
 @numba.jit(fastmath=True, nogil=True, parallel = True)
@@ -22,14 +25,13 @@ def f_b(TP, FP, TN, FN, args = [1]):
     b = args[0]
     return (1+b**2)*TP/((1+b**2)*TP + b*FN + FP)
 
-@numba.njit(fastmath=True, nogil=True, parallel = True)
-def jaccard(TP, FP, TN, FN, args = []):
+@numba.njit(fastmath=True, nogil=True)
+def jaccard(TP, FP, TN, FN, args = [1]):
     return TP/(TP + FP + FN)
 
 ## MAXIMIZATION OF THE SCORE ##
 @numba.njit(fastmath=True, nogil=True, parallel = True)
 def max_func(p, func, args):
-
     n = len(p)
     Umax, kmax, U  = 0, 0, 0
     C = np.zeros((n+1,n+1))
@@ -78,9 +80,9 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     N = len(SOL[0])
     ST = len(T_CALIB)
 
-    # define the utility function and its arguments
-    func = f_b
-    args = [1]
+    # Define the utility function and its arguments
+    func = jaccard
+    args = [1] #parameter for the utility function
 
     SCORE = np.zeros((S, 7))
     KLIST = np.zeros((S, 8))
@@ -149,10 +151,12 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     # Low threshold
     thlow = np.ones(N)
     for i in range(N):
-        for j in range(ST):
-            if T_CALIB[j,i] == 1:
-                thlow[i] = min(thlow[i], P_CALIB[j,i])
-    print('Low threshold done')
+        per = 100 - np.mean(T_CALIB[:,i])*100
+        if per == 100 :
+            thlow[i] = 1
+        else:
+            thlow[i] = np.percentile(P_CALIB[:,i], per)
+    print('Percentile threshold done')
 
     # 5% threshold
     th5pc = np.ones(N)
@@ -162,7 +166,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
             th5pc[i] = np.percentile(P_CALIB[occ,i], 5)
         else:
             th5pc[i] = 1
-    print('5% threshold done')
+    print('5%TP threshold done')
 
 
     print('CALIBRATION DONE')
@@ -198,9 +202,9 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
         nth[sort[:Kth]] = 1
         U_th = score(nth,tar,func, args)
 
-        nlow = probas[sort] > thlow
-        Klow = np.sum(nlow)
-        U_low = score(nlow,tar,func, args)
+        nper = probas[sort] > thlow
+        Kper = np.sum(nper)
+        U_per = score(nper,tar,func, args)
 
         n5pc = probas[sort] > th5pc
         K5pc = np.sum(n5pc)
@@ -211,8 +215,8 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
         nsum[sort[:Ksum]] = 1
         U_sum = score(nsum,tar,func, args)
 
-        KLIST[i] = np.array([K, Ktopk, K0_5, Kth, Klow, K5pc, Ksum, np.sum(tar)])
-        SCORE[i] = np.array([U, U_topk, U_0_5, U_th, U_low, U_5pc, U_sum])
+        KLIST[i] = np.array([K, Ktopk, K0_5, Kth, Kper, K5pc, Ksum, np.sum(tar)])
+        SCORE[i] = np.array([U, U_topk, U_0_5, U_th, U_per, U_5pc, U_sum])
 
 
         OUTPUT.append(sort[:K])
@@ -221,20 +225,20 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     print("Topk         :" , np.mean(SCORE[:,1]))
     print("Th_0.5       :" , np.mean(SCORE[:,2]))
     print("Th_opti      :" , np.mean(SCORE[:,3]))
-    print("Th_lowest    :" , np.mean(SCORE[:,4]))
-    print("Th_5%        :" , np.mean(SCORE[:,5]))
+    print("Th_per       :" , np.mean(SCORE[:,4]))
+    print("Th_95%Rec    :" , np.mean(SCORE[:,5]))
     print("Sum          :" , np.mean(SCORE[:,6]))
 
     return OUTPUT, KLIST,SCORE
  
 
-def main(pval = 0.3): #percentage of testset used for calibration (0% = use trainset)
+def main(pval = 0): #percentage of testset used for calibration (0% = use trainset)
 
     ## DEFINE FILE PATH ##
-    sol_file = 'data_examples/hmsc_test_species.csv' # test true species vector
-    pred_file = 'data_examples/hmsc_test_probas.csv' # test predicted probabilities
-    tcalib_file = 'data/GeoLifeCLEF_tcalib.csv' # train true species vector (not used if pval > 0)
-    pcalib_file = 'data/GeoLifeCLEF_pcalib.csv' # train predicted probabilities (not used if pval > 0)
+    sol_file = 'data/birds_study_species.csv' # test true species vector
+    pred_file = 'data/birds_study_probas.csv' # test predicted probabilities
+    tcalib_file = 'data/birds_study_species.csv' # train true species vector (not used if pval > 0)
+    pcalib_file = 'data/birds_study_calib.csv' # train predicted probabilities (not used if pval > 0)
 
 
     ## LOAD DATA ##
@@ -292,12 +296,12 @@ def main(pval = 0.3): #percentage of testset used for calibration (0% = use trai
     
     p.DataFrame(
         score, 
-        columns=['max', 'topk', 'th_0.5', 'th_opti', 'th_lowest', 'th_5%', 'sum']
+        columns=['max', 'topk', 'th_0.5', 'th_opti', 'th_per', 'th_5%', 'sum']
         ).to_csv("submissions/score_distrib.csv", index = False)
 
     p.DataFrame(
         nb_species, 
-        columns=['max', 'topk', 'th_0.5', 'th_opti', 'th_lowest', 'th_5%', 'sum','true']
+        columns=['max', 'topk', 'th_0.5', 'th_opti', 'th_per', 'th_5%', 'sum','true']
         ).to_csv("submissions/nb_species.csv", index = False)
 
 
