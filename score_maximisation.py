@@ -5,10 +5,10 @@ import numba
 from numba import cuda
 from tqdm import tqdm
 import math
-from time import perf_counter
-import random
+import configparser
 
-random.seed(42)
+
+np.random.seed(1312)
 
 ## SCORE CALCULATION BASED ON SET VALUE METRICS ##
 @numba.jit(fastmath=True, nogil=True, parallel = True)
@@ -75,14 +75,11 @@ def sum_th(p) :
 
 ## APPLY DECISION FUNCTIONS TO EACH SITES ##
 @numba.njit(fastmath=True, nogil = True)
-def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
+def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args):
     S = len(SOL)
     N = len(SOL[0])
     ST = len(T_CALIB)
 
-    # Define the utility function and its arguments
-    func = jaccard
-    args = [1] #parameter for the utility function
 
     SCORE = np.zeros((S, 7))
     KLIST = np.zeros((S, 8))
@@ -166,7 +163,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
             th5pc[i] = np.percentile(P_CALIB[occ,i], 5)
         else:
             th5pc[i] = 1
-    print('5%TP threshold done')
+    print('95%Rec threshold done')
 
 
     print('CALIBRATION DONE')
@@ -232,14 +229,40 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB):
     return OUTPUT, KLIST,SCORE
  
 
-def main(pval = 0): #percentage of testset used for calibration (0% = use trainset)
+def main():
+
+    ## CONFIGURATION FILE ##
+    config = configparser.ConfigParser()
+    config.read('parameters.ini')
 
     ## DEFINE FILE PATH ##
-    sol_file = 'data/birds_study_species.csv' # test true species vector
-    pred_file = 'data/birds_study_probas.csv' # test predicted probabilities
-    tcalib_file = 'data/birds_study_species.csv' # train true species vector (not used if pval > 0)
-    pcalib_file = 'data/birds_study_calib.csv' # train predicted probabilities (not used if pval > 0)
+    sol_file =  config['File paths']['sol_file']
+    pred_file = config['File paths']['pred_file']
+    tcalib_file = config['File paths']['tcalib_file']
+    pcalib_file = config['File paths']['pcalib_file'] 
 
+    ## DEFINE PARAMETERS OF EXPERIMENT ##
+    pval = float(config['Experiment']['prob_val'])
+    train_calib = bool(config['Experiment']['train_calib'])
+    predict_val = bool(config['Experiment']['predict_val'])
+
+    ## DEFINE UTILITY FUNCTION ##
+    func = config['Utility function']['metric']
+    param = config['Utility function']['param']
+
+    if pval < 0 or pval > 1:
+        raise ValueError("prob_val must be between 0 and 1")
+    try :
+        args = list(map(float, param.split(',')))
+        if func == 'f_b':
+            func = f_b
+        elif func == 'jaccard':
+            func = jaccard
+        else:
+            raise ValueError(f"{func} metric must be first implemented")
+        _ = func(1, 1, 1, 1, args) 
+    except ValueError:
+         raise ValueError(f"{func} metric must be first implemented")
 
     ## LOAD DATA ##
     sol = p.read_csv(sol_file)
@@ -250,7 +273,10 @@ def main(pval = 0): #percentage of testset used for calibration (0% = use trains
     sol = probas['speciesId'].to_numpy(dtype=str)
     PROBAS = probas.drop(columns = ['surveyId', 'speciesId']).to_numpy(dtype=np.float32)
     del probas
-    if pval == 0:
+    
+    pick = np.random.randint(0, len(sol), size = int(len(sol)*pval))
+
+    if train_calib :
         tcalib  = p.read_csv(tcalib_file)
         pcalib  = p.read_csv(pcalib_file, delimiter = ',')
         pcalib = pcalib.join(tcalib.set_index('surveyId'), on='surveyId')
@@ -260,9 +286,10 @@ def main(pval = 0): #percentage of testset used for calibration (0% = use trains
         del pcalib
 
     else:
-        pick = np.random.randint(0, len(sol), size = int(len(sol)*pval))
         tcalib = sol[pick]
         P_CALIB = PROBAS[pick]
+    
+    if not predict_val:
         PROBAS = np.delete(PROBAS, pick, axis = 0)
         sol = np.delete(sol, pick, axis = 0)
         surveys = np.delete(surveys, pick, axis = 0)
@@ -285,7 +312,7 @@ def main(pval = 0): #percentage of testset used for calibration (0% = use trains
             T_CALIB[i,int(id)] = 1
     del tcalib
 
-    output, nb_species , score = iterate(SOL, PROBAS, P_CALIB, T_CALIB)
+    output, nb_species , score = iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args)
 
     data_concatenated = [' '.join(map(str, row)) for row in output]
 
@@ -296,12 +323,12 @@ def main(pval = 0): #percentage of testset used for calibration (0% = use trains
     
     p.DataFrame(
         score, 
-        columns=['max', 'topk', 'th_0.5', 'th_opti', 'th_per', 'th_5%', 'sum']
+        columns = ['max', 'topk', 'th_0.5', 'th_opti', 'th_per', 'th_5%', 'sum']
         ).to_csv("submissions/score_distrib.csv", index = False)
 
     p.DataFrame(
         nb_species, 
-        columns=['max', 'topk', 'th_0.5', 'th_opti', 'th_per', 'th_5%', 'sum','true']
+        columns = ['max', 'topk', 'th_0.5', 'th_opti', 'th_per', 'th_5%', 'sum','true']
         ).to_csv("submissions/nb_species.csv", index = False)
 
 

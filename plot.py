@@ -13,7 +13,15 @@ def run_wmw_test():
         wmw, pvalue = stats.mannwhitneyu(score.iloc[:,0], score.iloc[:,i], alternative='greater')
         print(f"{names[0]} vs {names[i]}: WMW = {wmw}, p-value = {pvalue}")
 
-run_wmw_test()
+def statistic(x, y, axis):
+    return np.mean(x, axis) - np.mean(y, axis)
+
+def run_permutation_test():
+    score = p.read_csv("submissions/score_distrib.csv")
+    names = score.columns
+    for i in range(1, len(score.columns)):
+        res = stats.permutation_test((score.iloc[:,0], score.iloc[:,i]), statistic = statistic, vectorized=True, alternative='greater')
+        print(f"{names[0]} vs {names[i]}: S = {res.statistic}, p-value = {res.pvalue}")
 
 def plot_score_distribution():
     title="Score Distribution"
@@ -110,4 +118,4 @@ def plot_calibration_curve():
     plt.ylim(0, 1)
     plt.show()
 
-plot_calibration_curve()
+run_permutation_test()
