@@ -65,7 +65,7 @@ def max_f_b_n2(p, func, args):
     b = args[0]**(-2)
     p = np.sort(p)[::-1]
     n = len(p)
-    Fmax, kmax  = -1, 0
+    Umax, kmax, U  = 0, 0, 0
     C = np.zeros((n+1,n+1))
     C[0,0] = 1
     for i in range(n): 
@@ -78,46 +78,22 @@ def max_f_b_n2(p, func, args):
         S[i] = 1/(i+1)
     
     k = 0
-    while k<n and F >= Fmax[0]:
-        F = 0
+    while k<n and U == Umax:
+        U = 0
         K = n - k
         for i in range(1, K+1):
-            F += 2*i*C[K,i]*S[i + K -1]
+            U += 2*i*C[K,i]*S[i + K -1]
         for i in range(2*(K-1)):
             S[i] = p[K-1]*S[i+1] + (1 - p[K-1])*S[i]
             
-        if F >= Fmax :
-            Fmax[0], kmax[0]  = F, K
+        if U >= Umax :
+            Umax, kmax  = U, K
         k += 1
+    return kmax, Umax
     
 @numba.njit(fastmath=True, nogil=True, parallel = True)
 def max_jaccard_n2(p, func, args):
-    p = np.sort(p)[::-1]
-    n = len(p)
-    Fmax, kmax  = -1, 0
-    C = np.zeros((n+1,n+1))
-    C[0,0] = 1
-    for i in range(n): 
-        C[i+1,0] = (1 - p[i])*C[i,0]
-        for j in range(i+1):
-            C[i+1,j+1] = p[i]*C[i,j] + (1 - p[i])*C[i,j+1]
-              
-    S = np.zeros(2*n)      
-    for i in range(2*n):
-        S[i] = 1/(i+1)
-    
-    k = 0
-    while k<n and F >= Fmax[0]:
-        F = 0
-        K = n - k
-        for i in range(1, K+1):
-            F += 2*i*C[K,i]*S[i + K -1]
-        for i in range(2*(K-1)):
-            S[i] = p[K-1]*S[i+1] + (1 - p[K-1])*S[i]
-            
-        if F >= Fmax :
-            Fmax[0], kmax[0]  = F, K
-        k += 1
+    pass
     
 ## BASELINE STRATEGIES ##
 @numba.njit(fastmath=True, nogil=True)
@@ -134,7 +110,7 @@ def sum_th(p) :
 
 ## APPLY DECISION FUNCTIONS TO EACH SITES ##
 @numba.njit(fastmath=True, nogil = True)
-def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, quad):
+def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
     S = len(SOL)
     N = len(SOL[0])
     ST = len(T_CALIB)
@@ -227,18 +203,6 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, quad):
 
     print('CALIBRATION DONE')
     print('BEGIN BINARY PREDICTIONS')
-
-
-    # Define maximization function #
-    if quad:
-        if func == f_b and args[0] == int(args[0]):
-            max_func = max_f_b_n2
-        elif func == jaccard:
-            max_func = max_jaccard_n2
-        else:
-            raise ValueError("Quadratic resolution impossible or not implemented")
-    else:
-        max_func = max_func_n3
 
 
     # Iterate throught the dataset #
@@ -336,6 +300,19 @@ def main():
         _ = func(1, 1, 1, 1, args) 
     except ValueError:
          raise ValueError(f"{func} metric must be first implemented")
+    
+    ## DEFINE MAXIMIZATION FUNCTION ##
+
+    if quad:
+        if func == jaccard:
+            max_func = max_jaccard_n2
+        elif func == f_b and args[0] == int(args[0]):
+            max_func = max_f_b_n2
+        else:
+            raise ValueError("Quadratic resolution impossible or not implemented")
+    else:
+        max_func = max_func_n3
+
 
     ## LOAD DATA ##
     sol = p.read_csv(sol_file)
@@ -385,7 +362,7 @@ def main():
             T_CALIB[i,int(id)] = 1
     del tcalib
 
-    output, nb_species , score = iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, quad)
+    output, nb_species , score = iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func)
 
     data_concatenated = [' '.join(map(str, row)) for row in output]
 
