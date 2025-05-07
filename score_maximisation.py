@@ -116,14 +116,15 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
     ST = len(T_CALIB)
 
 
-    SCORE = np.zeros((S, 7))
-    KLIST = np.zeros((S, 8))
+    SCORE = np.zeros((S, 9))
+    KLIST = np.zeros((S, 10))
 
     OUTPUT = []
 
     # Calibrate strategies on the given data #
 
-    print('BEGIN CALIBRATION')
+    print('BEGIN CALIBRATION...')
+
     # TopK
     Ktopk = 0
     Ut_topkmax = 0.
@@ -180,7 +181,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
     th = thmax
     print('Global threshold done')
 
-    # Low threshold
+    # Frequency threshold
     thlow = np.ones(N)
     for i in range(N):
         per = 100 - np.mean(T_CALIB[:,i])*100
@@ -188,21 +189,25 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
             thlow[i] = 1
         else:
             thlow[i] = np.percentile(P_CALIB[:,i], per)
-    print('Percentile threshold done')
+    print('Frequency threshold done')
 
-    # 5% threshold
-    th5pc = np.ones(N)
+    # Conformal threshold
+    th25 = np.ones(N)
+    th50 = np.ones(N)
+    th75 = np.ones(N)
+
     for i in range(N):
         occ = np.where(T_CALIB[:,i] == 1)[0]
         if len(occ) > 0:
-            th5pc[i] = np.percentile(P_CALIB[occ,i], 5)
-        else:
-            th5pc[i] = 1
-    print('95%Rec threshold done')
+            th25[i] = np.percentile(P_CALIB[occ,i], 75)
+            th50[i] = np.percentile(P_CALIB[occ,i], 50)
+            th75[i] = np.percentile(P_CALIB[occ,i], 25)
+
+    print('Conformal calibration done')
 
 
-    print('CALIBRATION DONE')
-    print('BEGIN BINARY PREDICTIONS')
+    print('...CALIBRATION DONE')
+    print('BEGIN BINARY PREDICTIONS...')
 
 
     # Iterate throught the dataset #
@@ -212,15 +217,15 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
         tar = SOL[i]
         
         sort = np.argsort(-probas)
+        input = probas[sort]
         mask = np.where(input > 0.0)[0] #clip species with null probability
-        input = probas[sort][mask]
+        input = input[mask]
 
         K, _ = max_func(input, func, args)
         pred = np.zeros(N).astype(np.intp)
         pred[sort[:K]] = 1
         U = score(pred,tar,func, args)
 
-        
         topk = np.zeros(N)
         topk[sort[:Ktopk]] = 1
         U_topk = score(topk,tar,func, args)
@@ -230,40 +235,92 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
         n0_5[sort[:K0_5]] = 1
         U_0_5 = score(n0_5,tar,func, args)
 
-        Kth = threshold(input, th)
-        nth = np.zeros(N)
-        nth[sort[:Kth]] = 1
-        U_th = score(nth,tar,func, args)
+        Kt = threshold(input, th)
+        nt = np.zeros(N)
+        nt[sort[:Kt]] = 1
+        U_t = score(nt,tar,func, args)
 
-        nper = probas[sort] > thlow
-        Kper = np.sum(nper)
-        U_per = score(nper,tar,func, args)
+        nf = probas[sort] > thlow
+        Kf = np.sum(nf)
+        U_f = score(nf,tar,func, args)
 
-        n5pc = probas[sort] > th5pc
-        K5pc = np.sum(n5pc)
-        U_5pc = score(n5pc,tar,func, args)
+        n25 = probas[sort] > th25
+        C25 = np.sum(n25)
+        U_25 = score(n25,tar,func, args)
+
+        n50 = probas[sort] > th50
+        C50 = np.sum(n50)
+        U_50 = score(n50,tar,func, args)
+
+        n75 = probas[sort] > th75
+        C75 = np.sum(n75)
+        U_75 = score(n75,tar,func, args)
 
         Ksum = sum_th(input)
         nsum = np.zeros(N)
         nsum[sort[:Ksum]] = 1
         U_sum = score(nsum,tar,func, args)
 
-        KLIST[i] = np.array([K, Ktopk, K0_5, Kth, Kper, K5pc, Ksum, np.sum(tar)])
-        SCORE[i] = np.array([U, U_topk, U_0_5, U_th, U_per, U_5pc, U_sum])
-
+        KLIST[i] = np.array([Ktopk, Kt, Kf,C25,C50,C75, K0_5, Ksum , K, np.sum(tar)])
+        SCORE[i] = np.array([U_topk, U_t, U_f, U_25, U_50, U_75, U_0_5, U_sum, U])
 
         OUTPUT.append(sort[:K])
 
-    print("Maximization :" , np.mean(SCORE[:,0]))
-    print("Topk         :" , np.mean(SCORE[:,1]))
-    print("Th_0.5       :" , np.mean(SCORE[:,2]))
-    print("Th_opti      :" , np.mean(SCORE[:,3]))
-    print("Th_per       :" , np.mean(SCORE[:,4]))
-    print("Th_95%Rec    :" , np.mean(SCORE[:,5]))
-    print("Sum          :" , np.mean(SCORE[:,6]))
+    print("Top K        :" , np.mean(SCORE[:,0]))
+    print("Th t         :" , np.mean(SCORE[:,1]))
+    print("Th t_f       :" , np.mean(SCORE[:,2]))
+    print("C_25%        :" , np.mean(SCORE[:,3]))
+    print("C_50%        :" , np.mean(SCORE[:,4]))
+    print("C_75%        :" , np.mean(SCORE[:,5]))
+    print("Th t_0.5     :" , np.mean(SCORE[:,6]))
+    print("Sum          :" , np.mean(SCORE[:,7]))
+    print("MaxExp       :" , np.mean(SCORE[:,8]))
 
     return OUTPUT, KLIST,SCORE
  
+
+
+
+
+## APPLY DECISION FUNCTIONS TO EACH SITES ##
+@numba.njit(fastmath=True, nogil = True)
+def iterate_maxexp(SOL, PROBAS, func, args, max_func):
+    S = len(SOL)
+    N = len(SOL[0])
+
+
+    SCORE = np.zeros(S)
+    KLIST = np.zeros(S)
+
+    OUTPUT = []
+
+    # Iterate throught the dataset #
+    for i in numba.prange(S):
+
+        probas = PROBAS[i]
+        tar = SOL[i]
+        
+        sort = np.argsort(-probas)
+        input = probas[sort]
+        mask = np.where(input > 0.0)[0] #clip species with null probability
+        input = input[mask]
+
+        K, _ = max_func(input, func, args)
+        pred = np.zeros(N).astype(np.intp)
+        pred[sort[:K]] = 1
+        U = score(pred,tar,func, args)
+
+
+        KLIST[i] = K
+        SCORE[i] = U
+
+        OUTPUT.append(sort[:K])
+
+    print("MaxExp :" , np.mean(SCORE))
+
+    return OUTPUT, KLIST,SCORE
+ 
+
 
 def main():
 
@@ -279,9 +336,34 @@ def main():
 
     ## DEFINE PARAMETERS OF EXPERIMENT ##
     pval = float(config['Experiment']['prob_val'])
-    train_calib = bool(config['Experiment']['train_calib'])
-    predict_val = bool(config['Experiment']['predict_val'])
-    quad = bool(config['Experiment']['run_quad'])
+
+    if config['Experiment']['train_calib'] == 'True' :
+        train_calib = True
+    elif config['Experiment']['train_calib'] == 'False' :
+        train_calib = False
+    else : 
+        raise ValueError("train_calib must be True or False")
+    
+    if config['Experiment']['predict_val'] == 'False' :
+        predict_val = False
+    elif config['Experiment']['predict_val'] == 'True' :
+        predict_val = True
+    else :
+        raise ValueError("predict_val must be True or False")
+
+    if config['Experiment']['run_quad'] == 'True' :
+        quad = True
+    elif config['Experiment']['run_quad'] == 'False' :
+        quad = False
+    else :
+        raise ValueError("run_quad must be True or False")
+    
+    if config['Experiment']['only_maxexp'] == 'True' :
+        only_maxexp = True
+    elif config['Experiment']['only_maxexp'] == 'False' :
+        only_maxexp = False
+    else :
+        raise ValueError("only_maxexp must be True or False")
 
     ## DEFINE UTILITY FUNCTION ##
     func = config['Utility function']['metric']
@@ -362,7 +444,10 @@ def main():
             T_CALIB[i,int(id)] = 1
     del tcalib
 
-    output, nb_species , score = iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func)
+    if only_maxexp:
+        output, nb_species, score = iterate_maxexp(SOL, PROBAS, func, args, max_func)
+    else:
+        output, nb_species , score = iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func)
 
     data_concatenated = [' '.join(map(str, row)) for row in output]
 
@@ -373,12 +458,12 @@ def main():
     
     p.DataFrame(
         score, 
-        columns = ['max', 'topk', 'th_0.5', 'th_opti', 'th_per', 'th_5%', 'sum']
+        columns = ['TopK', 'Th t', 'Th t_f', 'C_25%', 'C_50%', 'C_75%', 'Th t_0.5', 'Sum', 'MaxExp']
         ).to_csv("submissions/score_distrib.csv", index = False)
 
     p.DataFrame(
         nb_species, 
-        columns = ['max', 'topk', 'th_0.5', 'th_opti', 'th_per', 'th_5%', 'sum', 'true']
+        columns = ['TopK', 'Th t', 'Th t_f', 'C_25%', 'C_50%', 'C_75%', 'Th t_0.5', 'Sum', 'MaxExp', 'True'] 
         ).to_csv("submissions/nb_species.csv", index = False)
 
 

@@ -119,3 +119,4 @@ def plot_calibration_curve():
     plt.show()
 
 run_permutation_test()
+plot_nb_species()
