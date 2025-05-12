@@ -19,9 +19,9 @@ def statistic(x, y, axis):
 def run_permutation_test():
     score = p.read_csv("submissions/score_distrib.csv")
     names = score.columns
-    for i in range(1, len(score.columns)):
-        res = stats.permutation_test((score.iloc[:,0], score.iloc[:,i]), statistic = statistic, vectorized=True, alternative='greater')
-        print(f"{names[0]} vs {names[i]}: S = {res.statistic}, p-value = {res.pvalue}")
+    for i in range(0, len(score.columns)-1):
+        res = stats.permutation_test((score.iloc[:,-1], score.iloc[:,i]), statistic = statistic, vectorized=True, alternative='greater')
+        print(f"{names[-1]} vs {names[i]}: S = {res.statistic}, p-value = {res.pvalue}")
 
 def plot_score_distribution():
     title="Score Distribution"
@@ -119,4 +119,3 @@ def plot_calibration_curve():
     plt.show()
 
 run_permutation_test()
-plot_nb_species()

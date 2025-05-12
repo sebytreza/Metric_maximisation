@@ -1,10 +1,6 @@
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as p
 import numba
-from numba import cuda
-from tqdm import tqdm
-import math
 import configparser
 
 
@@ -116,8 +112,8 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
     ST = len(T_CALIB)
 
 
-    SCORE = np.zeros((S, 9))
-    KLIST = np.zeros((S, 10))
+    SCORE = np.zeros((S, 7))
+    KLIST = np.zeros((S, 8))
 
     OUTPUT = []
 
@@ -192,17 +188,28 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
     print('Frequency threshold done')
 
     # Conformal threshold
-    th25 = np.ones(N)
-    th50 = np.ones(N)
-    th75 = np.ones(N)
+    e = 0.01
+    c = 1 -e
+    thc_max = np.ones(N)
+    Uc_max = 0.
+    thc = np.ones(N)
+    while c >= 0:
+        Uc = 0.
+        for i in range(N):
+            occ = np.where(T_CALIB[:,i] == 1)[0]
+            if len(occ) > 0:
+                thc[i] = np.percentile(P_CALIB[occ,i], int(c*100))
 
-    for i in range(N):
-        occ = np.where(T_CALIB[:,i] == 1)[0]
-        if len(occ) > 0:
-            th25[i] = np.percentile(P_CALIB[occ,i], 75)
-            th50[i] = np.percentile(P_CALIB[occ,i], 50)
-            th75[i] = np.percentile(P_CALIB[occ,i], 25)
-
+        for i in range(ST):
+            probas = P_CALIB[i]
+            tar = T_CALIB[i]
+            nc = probas > thc
+            Uc += score(nc,tar,func, args)
+        if Uc > Uc_max:
+            Uc_max = Uc
+            thc_max = thc
+        c = c - e
+    thc = thc_max
     print('Conformal calibration done')
 
 
@@ -240,41 +247,33 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
         nt[sort[:Kt]] = 1
         U_t = score(nt,tar,func, args)
 
-        nf = probas[sort] > thlow
+        nf = probas > thlow
         Kf = np.sum(nf)
         U_f = score(nf,tar,func, args)
 
-        n25 = probas[sort] > th25
-        C25 = np.sum(n25)
-        U_25 = score(n25,tar,func, args)
-
-        n50 = probas[sort] > th50
-        C50 = np.sum(n50)
-        U_50 = score(n50,tar,func, args)
-
-        n75 = probas[sort] > th75
-        C75 = np.sum(n75)
-        U_75 = score(n75,tar,func, args)
+        nc = probas > thc
+        C = np.sum(nc)
+        U_c = score(nc,tar,func, args)
 
         Ksum = sum_th(input)
         nsum = np.zeros(N)
         nsum[sort[:Ksum]] = 1
         U_sum = score(nsum,tar,func, args)
 
-        KLIST[i] = np.array([Ktopk, Kt, Kf,C25,C50,C75, K0_5, Ksum , K, np.sum(tar)])
-        SCORE[i] = np.array([U_topk, U_t, U_f, U_25, U_50, U_75, U_0_5, U_sum, U])
+        KLIST[i] = np.array([Ktopk, Kt, Kf,C, K0_5, Ksum , K, np.sum(tar)])
+        SCORE[i] = np.array([U_topk, U_t, U_f, U_c, U_0_5, U_sum, U])
+
+        SCORE[i] = np.array([U_topk, U_t, U_f, U_c, U_0_5, U_sum, U])
 
         OUTPUT.append(sort[:K])
 
     print("Top K        :" , np.mean(SCORE[:,0]))
     print("Th t         :" , np.mean(SCORE[:,1]))
     print("Th t_f       :" , np.mean(SCORE[:,2]))
-    print("C_25%        :" , np.mean(SCORE[:,3]))
-    print("C_50%        :" , np.mean(SCORE[:,4]))
-    print("C_75%        :" , np.mean(SCORE[:,5]))
-    print("Th t_0.5     :" , np.mean(SCORE[:,6]))
-    print("Sum          :" , np.mean(SCORE[:,7]))
-    print("MaxExp       :" , np.mean(SCORE[:,8]))
+    print("C_opti       :" , np.mean(SCORE[:,3]))
+    print("Th t_0.5     :" , np.mean(SCORE[:,4]))
+    print("Sum          :" , np.mean(SCORE[:,5]))
+    print("MaxExp       :" , np.mean(SCORE[:,6]))
 
     return OUTPUT, KLIST,SCORE
  
@@ -458,12 +457,12 @@ def main():
     
     p.DataFrame(
         score, 
-        columns = ['TopK', 'Th t', 'Th t_f', 'C_25%', 'C_50%', 'C_75%', 'Th t_0.5', 'Sum', 'MaxExp']
+        columns = ['TopK', 'Th t', 'Th t_f', 'C_opti', 'Th t_0.5', 'Sum', 'MaxExp']
         ).to_csv("submissions/score_distrib.csv", index = False)
 
     p.DataFrame(
         nb_species, 
-        columns = ['TopK', 'Th t', 'Th t_f', 'C_25%', 'C_50%', 'C_75%', 'Th t_0.5', 'Sum', 'MaxExp', 'True'] 
+        columns = ['TopK', 'Th t', 'Th t_f', 'C_opti', 'Th t_0.5', 'Sum', 'MaxExp', 'True'] 
         ).to_csv("submissions/nb_species.csv", index = False)
 
 
