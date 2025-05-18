@@ -162,14 +162,15 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
             mask = np.where(probas > 0)[0]
             input = probas[sort][mask]
             topk = np.zeros(N)
-            topk[sort[:Ktopk+1]] = 1
+            topk[sort[:Ktopk]] = 1
             Ut_topk += score(topk,tar,func, args)
         if Ut_topk >= Ut_topkmax:
             Ut_topkmax = Ut_topk
             Ktopkmax = Ktopk
         Ktopk += 1
 
-    Ktopk = Ktopkmax +1
+    Ktopk = Ktopkmax
+    print(Ut_topkmax/ST)
     print('Topk done')
 
     # Global threshold
@@ -195,6 +196,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
         th = th - e
     
     th = thmax
+    print(Uth_max/ST)
     print('Global threshold done')
 
     # Frequency threshold
@@ -227,10 +229,10 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
             Uc += score(nc,tar,func, args)
         if Uc > Uc_max:
             Uc_max = Uc
-            thc_max = thc
-            print(c, Uc_max/ST)
+            thc_max = thc.copy()
         c = c - e
     thc = thc_max
+
     print('Conformal calibration done')
 
 
@@ -243,7 +245,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
 
         probas = PROBAS[i]
         tar = SOL[i]
-        
+
         sort = np.argsort(-probas)
         input = probas[sort]
         mask = np.where(input > 0.0)[0] #clip species with null probability
