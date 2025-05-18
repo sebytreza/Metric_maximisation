@@ -44,8 +44,8 @@ def plot_nb_species():
     ylabel="Delta from True"
 
     nb_species = p.read_csv("submissions/nb_species.csv")
-    delta = nb_species - nb_species['true'].values[:, np.newaxis]
-    delta = delta.drop(columns = ['true'])
+    delta = nb_species - nb_species['True'].values[:, np.newaxis]
+    delta = delta.drop(columns = ['True'])
 
     plt.figure(figsize=(10, 6))
     sb.violinplot(data= delta, palette="muted")
@@ -118,4 +118,4 @@ def plot_calibration_curve():
     plt.ylim(0, 1)
     plt.show()
 
-run_permutation_test()
+plot_nb_species()

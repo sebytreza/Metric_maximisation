@@ -25,11 +25,31 @@ def f_b(TP, FP, TN, FN, args = [1]):
 def jaccard(TP, FP, TN, FN, args = [1]):
     return TP/(TP + FP + FN)
 
+
+@numba.njit(fastmath=True, nogil=True)
+def deltaSR2(TP, FP, TN, FN, args = [1]):
+    return -(FN-FP)**2
+
+@numba.njit(fastmath=True, nogil=True)
+def deltaSR1(TP, FP, TN, FN, args = [1]):
+    return -abs(FN-FP)
+
+@numba.njit(fastmath=True, nogil=True)
+def tss(TP, FP, TN, FN, args = [1]):
+    sensitivity = 0
+    specificity = 0
+    if (TP + FN) != 0:
+        sensitivity = TP / (TP + FN)
+    if (FP + TN) != 0:
+        specificity = TN / (FP + TN)
+    return sensitivity + specificity - 1
+
+
 ## MAXIMIZATION OF THE SCORE ##
 @numba.njit(fastmath=True, nogil=True, parallel = True)
 def max_func_n3(p, func, args):
     n = len(p)
-    Umax, kmax, U  = 0, 0, 0
+    Umax, kmax, U  = -np.inf, 0, -np.inf
     C = np.zeros((n+1,n+1))
     C[0,0] = 1
     for i in range(n):
@@ -45,12 +65,11 @@ def max_func_n3(p, func, args):
             S[i+1,j+1] = p[n-i-1]*S[i,j] + (1 - p[n-i-1])*S[i,j+1]     
 
     K = 1
-    while K < n and Umax == U:
+    while K < n and U == Umax:
         U = 0.
         for i in range(K+1):
             for j in range(n - K + 1):
                 U += C[K,i]*S[n-K,j]*func(i, K -i, n-K-j, j, args) #func(tp,fp,tn, fn)
-            
         if U >= Umax :
             Umax, kmax  = U, K
         K += 1
@@ -61,7 +80,7 @@ def max_f_b_n2(p, func, args):
     b = args[0]**(-2)
     p = np.sort(p)[::-1]
     n = len(p)
-    Umax, kmax, U  = 0, 0, 0
+    Umax, kmax, U  = -np.inf, 0, -np.inf
     C = np.zeros((n+1,n+1))
     C[0,0] = 1
     for i in range(n): 
@@ -101,7 +120,8 @@ def threshold(p, th = 0.5) :
 
 @numba.njit(fastmath=True, nogil=True, parallel = True)
 def sum_th(p) :
-    return int(np.sum(p)) + 1
+    s = np.sum(p)
+    return int(2*s - int(s))
 
 
 ## APPLY DECISION FUNCTIONS TO EACH SITES ##
@@ -123,7 +143,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
 
     # TopK
     Ktopk = 0
-    Ut_topkmax = 0.
+    Ut_topkmax = -np.inf
     Ktopkmax = 0
 
     upper_bound = 80
@@ -156,7 +176,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
     e = 0.01
     th = 1
     thmax = 1
-    Uth_max = 0.
+    Uth_max = -np.inf
     while th >= 0:
         Ut_th = 0.
         for i in range(ST):
@@ -191,7 +211,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
     e = 0.01
     c = 1 -e
     thc_max = np.ones(N)
-    Uc_max = 0.
+    Uc_max = -np.inf
     thc = np.ones(N)
     while c >= 0:
         Uc = 0.
@@ -208,6 +228,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
         if Uc > Uc_max:
             Uc_max = Uc
             thc_max = thc
+            print(c, Uc_max/ST)
         c = c - e
     thc = thc_max
     print('Conformal calibration done')
@@ -262,9 +283,6 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
 
         KLIST[i] = np.array([Ktopk, Kt, Kf,C, K0_5, Ksum , K, np.sum(tar)])
         SCORE[i] = np.array([U_topk, U_t, U_f, U_c, U_0_5, U_sum, U])
-
-        SCORE[i] = np.array([U_topk, U_t, U_f, U_c, U_0_5, U_sum, U])
-
         OUTPUT.append(sort[:K])
 
     print("Top K        :" , np.mean(SCORE[:,0]))
@@ -376,6 +394,12 @@ def main():
             func = f_b
         elif func == 'jaccard':
             func = jaccard
+        elif func == 'deltaSR2':
+            func = deltaSR2
+        elif func == 'deltaSR1':
+            func = deltaSR1
+        elif func == 'tss':
+            func = tss
         else:
             raise ValueError(f"{func} metric must be first implemented")
         _ = func(1, 1, 1, 1, args) 
