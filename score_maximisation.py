@@ -170,7 +170,6 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
         Ktopk += 1
 
     Ktopk = Ktopkmax
-    print(Ut_topkmax/ST)
     print('Topk done')
 
     # Global threshold
@@ -196,7 +195,6 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
         th = th - e
     
     th = thmax
-    print(Uth_max/ST)
     print('Global threshold done')
 
     # Frequency threshold
@@ -356,33 +354,40 @@ def main():
     ## DEFINE PARAMETERS OF EXPERIMENT ##
     pval = float(config['Experiment']['prob_val'])
 
-    if config['Experiment']['train_calib'] == 'True' :
+    if config['Experiment']['train_calib'].lower() == 'true' :
         train_calib = True
-    elif config['Experiment']['train_calib'] == 'False' :
+    elif config['Experiment']['train_calib'].lower() == 'false' :
         train_calib = False
     else : 
         raise ValueError("train_calib must be True or False")
     
-    if config['Experiment']['predict_val'] == 'False' :
+    if config['Experiment']['predict_val'].lower() == 'false' :
         predict_val = False
-    elif config['Experiment']['predict_val'] == 'True' :
+    elif config['Experiment']['predict_val'].lower() == 'true' :
         predict_val = True
     else :
         raise ValueError("predict_val must be True or False")
 
-    if config['Experiment']['run_quad'] == 'True' :
+    if config['Experiment']['run_quad'].lower() == 'true' :
         quad = True
-    elif config['Experiment']['run_quad'] == 'False' :
+    elif config['Experiment']['run_quad'].lower() == 'false' :
         quad = False
     else :
         raise ValueError("run_quad must be True or False")
     
-    if config['Experiment']['only_maxexp'] == 'True' :
+    if config['Experiment']['only_maxexp'].lower() == 'true' :
         only_maxexp = True
-    elif config['Experiment']['only_maxexp'] == 'False' :
+    elif config['Experiment']['only_maxexp'].lower() == 'false' :
         only_maxexp = False
     else :
         raise ValueError("only_maxexp must be True or False")
+    
+    if config['Experiment']['transpose'].lower() == 'true' :
+        transpose = True
+    elif config['Experiment']['transpose'].lower() == 'false' :
+        transpose = False
+    else :
+        raise ValueError("transpose must be True or False")
 
     ## DEFINE UTILITY FUNCTION ##
     func = config['Utility function']['metric']
@@ -469,28 +474,51 @@ def main():
             T_CALIB[i,int(id)] = 1
     del tcalib
 
+    if transpose:
+        PROBAS = PROBAS.T
+        SOL = SOL.T
+        P_CALIB = P_CALIB.T
+        T_CALIB = T_CALIB.T
+
     if only_maxexp:
         output, nb_species, score = iterate_maxexp(SOL, PROBAS, func, args, max_func)
     else:
         output, nb_species , score = iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func)
 
-    data_concatenated = [' '.join(map(str, row)) for row in output]
 
-    p.DataFrame(
-        {'surveyId': surveys,
-        'speciesId': data_concatenated,
-        }).to_csv("submissions/binary_predictions.csv", index = False)
-    
+
     p.DataFrame(
         score, 
         columns = ['TopK', 'Th t', 'Th t_f', 'C_opti', 'Th t_0.5', 'Sum', 'MaxExp']
         ).to_csv("submissions/score_distrib.csv", index = False)
 
+    if transpose:
+        data_concatenated = ['']*S
+        for id_spec in range(len(output)):
+            spec = output[id_spec]
+            for id_site in spec:
+                data_concatenated[id_site] += ' ' + str(id_spec)
+
+
+        p.DataFrame(
+            nb_species, 
+            columns = ['TopK', 'Th t', 'Th t_f', 'C_opti', 'Th t_0.5', 'Sum', 'MaxExp', 'True'] 
+            ).to_csv("submissions/nb_sites.csv", index = False)
+    
+    else :
+        data_concatenated = [' '.join(map(str, row)) for row in output]
+    
+
+        p.DataFrame(
+            nb_species, 
+            columns = ['TopK', 'Th t', 'Th t_f', 'C_opti', 'Th t_0.5', 'Sum', 'MaxExp', 'True'] 
+            ).to_csv("submissions/nb_species.csv", index = False)
+
+
     p.DataFrame(
-        nb_species, 
-        columns = ['TopK', 'Th t', 'Th t_f', 'C_opti', 'Th t_0.5', 'Sum', 'MaxExp', 'True'] 
-        ).to_csv("submissions/nb_species.csv", index = False)
-
-
+        {'surveyId': surveys,
+        'speciesId': data_concatenated,
+        }).to_csv("submissions/binary_predictions.csv", index = False)
+        
 if __name__ == "__main__":
     main()
