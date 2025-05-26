@@ -4,6 +4,7 @@ import numpy as np
 import pandas as p
 import seaborn as sb
 from scipy import stats
+from sklearn.metrics import r2_score
 
 colors = ['#11999E', '#40514E', '#FFB22C']
 
@@ -203,6 +204,39 @@ def plot_species_richness_all():
 
     nb_species = p.read_csv("submissions/nb_species.csv")
     true_nb_species = nb_species['True'].values
+    pred_nb_species = nb_species.drop(columns = ['True']).to_numpy(dtype=np.float32)
+    N = max(pred_nb_species.max(), true_nb_species.max())
+
+    X = true_nb_species
+
+    for i in range(pred_nb_species.shape[1]):
+        plt.figure(figsize=(10, 6))
+        plt.plot((0,N),(0,N), c = 'gray', linewidth = 1)
+        plt.grid(linewidth = 1)
+
+
+        Y = pred_nb_species[:,i]
+        r2 = r2_score(X, Y)
+        
+
+        plt.hist2d(X, Y, bins= [np.arange(0, N, 1), np.arange(0, N, 1)], cmap= mcolors.LinearSegmentedColormap.from_list("cgrad", [colors[0]+"50", colors[0]] ) , cmin=1)
+        plt.title(title + f" ({nb_species.columns[i]})", fontsize = 18)
+        plt.annotate(f"R² = {r2:.2f}", xy=(0.05, 0.95), xycoords='axes fraction', fontsize=16, ha='left', va='top', color=colors[0], backgroundcolor='white')
+        plt.xlabel(xlabel, fontsize = 14)
+        plt.ylabel(ylabel, fontsize = 14)
+        plt.gca().set_aspect('equal')
+        plt.xlim(0, N)
+        plt.ylim(0, N)
+    plt.show()
+
+
+def plot_species_range_all():
+    title="Species range"
+    xlabel="True species range"
+    ylabel="Predicted species range"
+
+    nb_species = p.read_csv("submissions/nb_sites.csv")
+    true_nb_species = nb_species['True'].values
     prob_nb_species = nb_species['Sum'].values
     pred_nb_species = nb_species.drop(columns = ['True', 'Sum']).to_numpy(dtype=np.float32)
     N = max(pred_nb_species.max(), true_nb_species.max())
@@ -218,17 +252,12 @@ def plot_species_richness_all():
         plt.plot((0,N),(0,N), c = 'gray', linewidth = 1)
         plt.grid(linewidth = 1)
 
-
         Y = pred_nb_species[:,i]
-        slope, intercept, r_value, _, _ = stats.linregress(X, Y)
-        regression_line = slope * np.array([0,N]) + intercept
 
-        # plt.plot([0,N], regression_linepb, c= colors[0],  alpha = 1, linewidth=2, label=f"Regression line (r={r_valuepb:.2f})")
-        # plt.scatter(X,Ypb, c = colors[0], s = 100, alpha = 0.5, marker = 's',label="SSE species richness")
 
-        # plt.plot([0,N], regression_line, c= colors[2], alpha = 1, linewidth=2, label=f"Regression line (r={r_value:.2f})")
-        # plt.scatter(X,Y, c = colors[2], s = 100, alpha = 0.5, marker = 's')
-        plt.hist2d(X, Y, bins= [np.arange(0, N, 1), np.arange(0, N, 1)], cmap= mcolors.LinearSegmentedColormap.from_list("cgrad", [colors[0]+"20", colors[0]] ) , cmin=1)
+        plt.scatter(X,Y, c = colors[2], s = 100, alpha = 0.5, marker = 's')
+    
+        #plt.hist2d(X, Y, bins= [np.arange(0, N, 1), np.arange(0, N, 1)], cmap= mcolors.LinearSegmentedColormap.from_list("cgrad", [colors[0]+"20", colors[0]] ) , cmin=1)
         plt.title(title + f" ({nb_species.columns[i]})", fontsize = 18)
         plt.xlabel(xlabel, fontsize = 14)
         plt.ylabel(ylabel, fontsize = 14)
@@ -238,6 +267,5 @@ def plot_species_richness_all():
     plt.show()
 
 
-
-
-plot_species_range()
+#run_permutation_test()
+plot_species_richness_all()

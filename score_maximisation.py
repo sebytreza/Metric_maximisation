@@ -18,6 +18,8 @@ def score(pred,target, func, args):
 ## DEFINE OF UTILITY FUNCTIONS ##
 @numba.njit(fastmath=True, nogil=True)
 def f_b(TP, FP, TN, FN, args = [1]):
+    if TP + FP + FN == 0:
+        return 0
     b = args[0]
     return (1+b**2)*TP/((1+b**2)*TP + b*FN + FP)
 
@@ -198,13 +200,13 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
     print('Global threshold done')
 
     # Frequency threshold
-    thlow = np.ones(N)
+    thf = np.ones(N)
     for i in range(N):
         per = 100 - np.mean(T_CALIB[:,i])*100
         if per == 100 :
-            thlow[i] = 1
+            thf[i] = 1
         else:
-            thlow[i] = np.percentile(P_CALIB[:,i], per)
+            thf[i] = np.percentile(P_CALIB[:,i], per)
     print('Frequency threshold done')
 
     # Conformal threshold
@@ -268,7 +270,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
         nt[sort[:Kt]] = 1
         U_t = score(nt,tar,func, args)
 
-        nf = probas > thlow
+        nf = probas > thf
         Kf = np.sum(nf)
         U_f = score(nf,tar,func, args)
 
@@ -294,10 +296,8 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
     print("MaxExp       :" , np.mean(SCORE[:,6]))
 
     return OUTPUT, KLIST,SCORE
+
  
-
-
-
 
 ## APPLY DECISION FUNCTIONS TO EACH SITES ##
 @numba.njit(fastmath=True, nogil = True)
@@ -336,8 +336,168 @@ def iterate_maxexp(SOL, PROBAS, func, args, max_func):
     print("MaxExp :" , np.mean(SCORE))
 
     return OUTPUT, KLIST,SCORE
- 
 
+
+## APPLY DECISION FUNCTIONS TO EACH SITES ##
+@numba.njit(fastmath=True, nogil = True)
+def iterate_t(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
+    S = len(SOL)
+    N = len(SOL[0])
+    ST = len(T_CALIB)
+
+
+    SCORE = np.zeros((N, 7))
+    KLIST = np.zeros((N, 8))
+
+    OUTPUT = []
+
+    # Calibrate strategies on the given data #
+
+    print('BEGIN CALIBRATION...')
+    # Global threshold
+    e = 0.01
+    th = 1
+    thmax = 1
+    Uth_max = -np.inf
+    while th >= 0:
+        Ut_th = 0.
+        for j in range(N):
+            probas = P_CALIB[:,j]
+            tar = T_CALIB[:,j]
+            sort = np.argsort(-probas)
+            mask = np.where(probas > 0)[0]
+            input = probas[sort][mask]
+            Kth = threshold(input, th = th)
+            nth = np.zeros(ST)
+            nth[sort[:Kth]] = 1
+            Ut_th += score(nth,tar,func, args)
+        if Ut_th >= Uth_max:
+            Uth_max = Ut_th
+            thmax = th
+        th = th - e
+    
+    th = thmax
+    print('Global threshold done')
+
+    # Species threshold
+    e = 0.01
+    ths = np.ones(N)
+    for j in numba.prange(N):
+        thsmax = 1
+        Uth_max = -np.inf
+        while ths[j] >= 0:
+            probas = P_CALIB[:,j]
+            tar = T_CALIB[:,j]
+            nth = probas > ths[j]
+            Ut_th = score(nth,tar,func, args)
+            if Ut_th >= Uth_max:
+                Uth_max = Ut_th
+                thsmax = ths[j]
+            ths[j] = ths[j] - e
+        
+        ths[j] = thsmax
+    print('Species threshold done')
+
+    # Frequency threshold
+    thf = np.ones(N)
+    for j in range(N):
+        per = 100 - np.mean(T_CALIB[:,j])*100
+        if per == 100 :
+            thf[j] = 1
+        else:
+            thf[j] = np.percentile(P_CALIB[:,j], per)
+    print('Frequency threshold done')
+
+    # Conformal threshold
+    e = 0.01
+    c = 1 -e
+    thc_max = np.ones(N)
+    Uc_max = -np.inf
+    thc = np.ones(N)
+    while c >= 0:
+        Uc = 0.
+        for j in range(N):
+            occ = np.where(T_CALIB[:,j] == 1)[0]
+            if len(occ) > 0:
+                thc[j] = np.percentile(P_CALIB[occ,j], int(c*100))
+
+        for j in range(N):
+            probas = P_CALIB[:,j]
+            tar = T_CALIB[:,j]
+            nc = probas > thc[j]
+            Uc += score(nc,tar,func, args)
+        if Uc > Uc_max:
+            Uc_max = Uc
+            thc_max = thc.copy()
+        c = c - e
+    thc = thc_max
+
+    print('Conformal calibration done')
+
+
+    print('...CALIBRATION DONE')
+    print('BEGIN BINARY PREDICTIONS...')
+
+
+    # Iterate throught the dataset #
+    for j in numba.prange(N):
+
+        probas = PROBAS[:,j]
+        tar = SOL[:,j]
+
+        sort = np.argsort(-probas)
+        input = probas[sort]
+        mask = np.where(input > 0.0)[0] #clip species with null probability
+        input = input[mask]
+
+        K, _ = max_func(input, func, args)
+        pred = np.zeros(S).astype(np.intp)
+        pred[sort[:K]] = 1
+        U = score(pred,tar,func, args)
+
+
+        Ks = threshold(input, th = ths[j])
+        ns = np.zeros(S)
+        ns[sort[:Ks]] = 1
+        U_s = score(ns,tar,func, args)
+
+
+        K0_5 = threshold(input, th = 0.5)
+        n0_5 = np.zeros(S)
+        n0_5[sort[:K0_5]] = 1
+        U_0_5 = score(n0_5,tar,func, args)
+
+        Kt = threshold(input, th)
+        nt = np.zeros(S)
+        nt[sort[:Kt]] = 1
+        U_t = score(nt,tar,func, args)
+
+        nf = probas > thf[j]
+        Kf = np.sum(nf)
+        U_f = score(nf,tar,func, args)
+
+        nc = probas > thc[j]
+        C = np.sum(nc)
+        U_c = score(nc,tar,func, args)
+
+        Ksum = sum_th(input)
+        nsum = np.zeros(S)
+        nsum[sort[:Ksum]] = 1
+        U_sum = score(nsum,tar,func, args)
+
+        KLIST[j] = np.array([Ks, Kt, Kf,C, K0_5, Ksum , K, np.sum(tar)])
+        SCORE[j] = np.array([U_s, U_t, U_f, U_c, U_0_5, U_sum, U])
+        OUTPUT.append(sort[:K])
+
+    print("Th t_s       :" , np.mean(SCORE[:,0]))
+    print("Th t         :" , np.mean(SCORE[:,1]))
+    print("Th t_f       :" , np.mean(SCORE[:,2]))
+    print("C_opti       :" , np.mean(SCORE[:,3]))
+    print("Th t_0.5     :" , np.mean(SCORE[:,4]))
+    print("Sum          :" , np.mean(SCORE[:,5]))
+    print("MaxExp       :" , np.mean(SCORE[:,6]))
+
+    return OUTPUT, KLIST,SCORE
 
 def main():
 
@@ -474,13 +634,11 @@ def main():
             T_CALIB[i,int(id)] = 1
     del tcalib
 
-    if transpose:
-        PROBAS = PROBAS.T
-        SOL = SOL.T
-        P_CALIB = P_CALIB.T
-        T_CALIB = T_CALIB.T
-
-    if only_maxexp:
+    if transpose :
+        if only_maxexp:
+            output, nb_species, score = iterate_maxexp(SOL.T, PROBAS.T, func, args, max_func)
+        output, nb_species, score = iterate_t(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func)
+    elif only_maxexp:
         output, nb_species, score = iterate_maxexp(SOL, PROBAS, func, args, max_func)
     else:
         output, nb_species , score = iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func)
@@ -502,7 +660,7 @@ def main():
 
         p.DataFrame(
             nb_species, 
-            columns = ['TopK', 'Th t', 'Th t_f', 'C_opti', 'Th t_0.5', 'Sum', 'MaxExp', 'True'] 
+            columns = ['Th_t_s', 'Th t', 'Th t_f', 'C_opti', 'Th t_0.5', 'Sum', 'MaxExp', 'True'] 
             ).to_csv("submissions/nb_sites.csv", index = False)
     
     else :
