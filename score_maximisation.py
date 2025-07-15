@@ -34,7 +34,11 @@ def deltaSR2(TP, FP, TN, FN, args = [1]):
 
 @numba.njit(fastmath=True, nogil=True)
 def deltaSR1(TP, FP, TN, FN, args = [1]):
-    return -abs(FN-FP)
+    delta = abs(FN-FP)
+    if delta < args[0]:
+        return -delta**2
+    else:
+        return -args[0]**2 - np.sqrt(delta - args[0])
 
 @numba.njit(fastmath=True, nogil=True)
 def tss(TP, FP, TN, FN, args = [1]):
@@ -190,7 +194,7 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
             Kth = threshold(input, th = th)
             nth = np.zeros(N)
             nth[sort[:Kth]] = 1
-            Ut_th += score(nth,tar,func, args)
+            Ut_th += score(nth, tar, func, args)
         if Ut_th >= Uth_max:
             Uth_max = Ut_th
             thmax = th
@@ -297,7 +301,6 @@ def iterate(SOL, PROBAS, P_CALIB, T_CALIB, func, args, max_func):
 
     return OUTPUT, KLIST,SCORE
 
- 
 
 ## APPLY DECISION FUNCTIONS TO EACH SITES ##
 @numba.njit(fastmath=True, nogil = True)
@@ -307,7 +310,7 @@ def iterate_maxexp(SOL, PROBAS, func, args, max_func):
 
 
     SCORE = np.zeros(S)
-    KLIST = np.zeros(S)
+    KLIST = np.zeros((S,2))
 
     OUTPUT = []
 
@@ -328,12 +331,15 @@ def iterate_maxexp(SOL, PROBAS, func, args, max_func):
         U = score(pred,tar,func, args)
 
 
-        KLIST[i] = K
+        KLIST[i] = [K, np.sum(tar)]
         SCORE[i] = U
 
         OUTPUT.append(sort[:K])
 
-    print("MaxExp :" , np.mean(SCORE))
+        K0 = KLIST[:,0]/np.mean(KLIST[:,0])
+        K1 = KLIST[:,1]/np.mean(KLIST[:,1])
+
+    print("MaxExp :" , 1 - np.mean((K0 - K1)**2)/np.var(K1))
 
     return OUTPUT, KLIST,SCORE
 
@@ -521,12 +527,12 @@ def main():
     else : 
         raise ValueError("train_calib must be True or False")
     
-    if config['Experiment']['predict_val'].lower() == 'false' :
-        predict_val = False
-    elif config['Experiment']['predict_val'].lower() == 'true' :
-        predict_val = True
+    if config['Experiment']['predict_cal'].lower() == 'false' :
+        predict_cal = False
+    elif config['Experiment']['predict_cal'].lower() == 'true' :
+        predict_cal = True
     else :
-        raise ValueError("predict_val must be True or False")
+        raise ValueError("predict_cal must be True or False")
 
     if config['Experiment']['run_quad'].lower() == 'true' :
         quad = True
@@ -591,7 +597,7 @@ def main():
     probas = p.read_csv(pred_file, delimiter = ',')
     probas = probas.join(sol.set_index('surveyId'), on='surveyId')
     probas = probas.dropna()
-    surveys = probas['surveyId']
+    surveys = probas['surveyId'].to_numpy(dtype=str)
     sol = probas['speciesId'].to_numpy(dtype=str)
     PROBAS = probas.drop(columns = ['surveyId', 'speciesId']).to_numpy(dtype=np.float32)
     del probas
@@ -605,17 +611,24 @@ def main():
         pcalib = pcalib.dropna()
         tcalib = pcalib['speciesId'].to_numpy(dtype=str)
         P_CALIB = pcalib.drop(columns = ['surveyId', 'speciesId']).to_numpy(dtype=np.float32)
+        s_calib = pcalib['surveyId']
         del pcalib
 
     else:
         tcalib = sol[pick]
         P_CALIB = PROBAS[pick]
+        s_calib = surveys[pick]
     
-    if not predict_val:
+
+    if predict_cal :
+        sol = tcalib
+        PROBAS = P_CALIB
+        surveys = s_calib
+
+    else :
         PROBAS = np.delete(PROBAS, pick, axis = 0)
         sol = np.delete(sol, pick, axis = 0)
         surveys = np.delete(surveys, pick, axis = 0)
-
 
     S = len(sol)
     ST = len(tcalib)
@@ -634,6 +647,8 @@ def main():
             T_CALIB[i,int(id)] = 1
     del tcalib
 
+
+
     if transpose :
         if only_maxexp:
             output, nb_species, score = iterate_maxexp(SOL.T, PROBAS.T, func, args, max_func)
@@ -647,7 +662,7 @@ def main():
 
     p.DataFrame(
         score, 
-        columns = ['TopK', 'Th t', 'Th t_f', 'C_opti', 'Th t_0.5', 'Sum', 'MaxExp']
+        columns = ['MaxExp'] if only_maxexp else ['TopK', 'Th t', 'Th t_f', 'C_opti', 'Th t_0.5', 'Sum', 'MaxExp']
         ).to_csv("submissions/score_distrib.csv", index = False)
 
     if transpose:
@@ -669,7 +684,7 @@ def main():
 
         p.DataFrame(
             nb_species, 
-            columns = ['TopK', 'Th t', 'Th t_f', 'C_opti', 'Th t_0.5', 'Sum', 'MaxExp', 'True'] 
+            columns = ["MaxExp", "True"] if only_maxexp else ['TopK', 'Th t', 'Th t_f', 'C_opti', 'Th t_0.5', 'Sum', 'MaxExp', 'True']
             ).to_csv("submissions/nb_species.csv", index = False)
 
 
