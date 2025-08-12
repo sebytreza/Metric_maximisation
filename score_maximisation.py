@@ -25,6 +25,8 @@ def f_b(TP, FP, TN, FN, args = [1]):
 
 @numba.njit(fastmath=True, nogil=True)
 def jaccard(TP, FP, TN, FN, args = [1]):
+    if TP + FP + FN == 0:
+        return 0
     return TP/(TP + FP + FN)
 
 
@@ -596,7 +598,6 @@ def main():
     sol = p.read_csv(sol_file)
     probas = p.read_csv(pred_file, delimiter = ',')
     probas = probas.join(sol.set_index('surveyId'), on='surveyId')
-    probas = probas.dropna()
     surveys = probas['surveyId'].to_numpy(dtype=str)
     sol = probas['speciesId'].to_numpy(dtype=str)
     PROBAS = probas.drop(columns = ['surveyId', 'speciesId']).to_numpy(dtype=np.float32)
@@ -608,7 +609,6 @@ def main():
         tcalib  = p.read_csv(tcalib_file)
         pcalib  = p.read_csv(pcalib_file, delimiter = ',')
         pcalib = pcalib.join(tcalib.set_index('surveyId'), on='surveyId')
-        pcalib = pcalib.dropna()
         tcalib = pcalib['speciesId'].to_numpy(dtype=str)
         P_CALIB = pcalib.drop(columns = ['surveyId', 'speciesId']).to_numpy(dtype=np.float32)
         s_calib = pcalib['surveyId']
@@ -637,16 +637,17 @@ def main():
     SOL = np.zeros((S,N), dtype = np.intp)
     for i in range(S) :
         r_sol = sol[i].split(' ')
-        for id in r_sol:
-            SOL[i,int(id)] = 1
+        if r_sol != ['nan']:
+            for id in r_sol:
+                SOL[i,int(id)] = 1
 
     T_CALIB = np.zeros((ST,N), dtype = np.intp)
     for i in range(ST) :
         t_p = tcalib[i].split(' ')
-        for id in t_p:
-            T_CALIB[i,int(id)] = 1
+        if t_p != ['nan']:
+            for id in t_p:
+                T_CALIB[i,int(id)] = 1
     del tcalib
-
 
 
     if transpose :
@@ -660,6 +661,7 @@ def main():
 
 
 
+
     p.DataFrame(
         score, 
         columns = ['MaxExp'] if only_maxexp else ['TopK', 'Th t', 'Th t_f', 'C_opti', 'Th t_0.5', 'Sum', 'MaxExp']
@@ -670,8 +672,10 @@ def main():
         for id_spec in range(len(output)):
             spec = output[id_spec]
             for id_site in spec:
-                data_concatenated[id_site] += ' ' + str(id_spec)
-
+                if data_concatenated[id_site] == '':
+                    data_concatenated[id_site] = str(id_spec)
+                else:
+                    data_concatenated[id_site] += ' ' + str(id_spec)
 
         p.DataFrame(
             nb_species, 
