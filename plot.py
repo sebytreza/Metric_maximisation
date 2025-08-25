@@ -1,5 +1,7 @@
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib as mpl
+from mpl_toolkits.basemap import Basemap
 import numpy as np
 import pandas as p
 import seaborn as sns
@@ -611,11 +613,18 @@ def plot_prev():
 
 def map_species():
 
-    species_idx = 0
-    probas_path = 'data/GeoLifeCLEF_probas.csv'
-    path_base = 'submissions/predictions_GLC_'
+    species_idx = 112
+    sol_path = 'data/cleaned_GeoLifeCLEF_species.csv'
+    probas_path = 'data/cleaned_GeoLifeCLEF_probas.csv'
+    path_base = 'submissions/pred_tc_'
     loc_path = 'data/GeoLifeCLEF_metadata_test.csv'
-    metrics = ['F1', 'F2']
+    metrics = ['F1', 'F2','F3','F4','F5', 'F6', 'F7', 'F8', 'F9', 'F10']
+
+    sol_path = 'data/cleaned_GeoLifeCLEF_tcalib.csv'
+    probas_path = 'data/cleaned_GeoLifeCLEF_pcalib.csv'
+    path_base = 'submissions/pred_train_'
+    loc_path = 'data/GeoLifeCLEF_metadata_train.csv'
+    metrics = ['F1','F2','F3','F4','F5']
 
     list_pred = []
     for metric in metrics:
@@ -628,45 +637,154 @@ def map_species():
     print(species_name)
 
     surveys = probas['surveyId'].to_numpy(dtype=str)
-
+    print(len(surveys))
     location_df = p.read_csv(loc_path)
-    location_df = probas.join(location_df.set_index('surveyId'), on='surveyId')
+    location_df = location_df.groupby('surveyId').first().reset_index()
+    location_df = probas.merge(location_df,how = "left", on='surveyId')[['lon', 'lat']]
     probas = probas.iloc[:, species_idx+1].to_numpy(dtype=np.float32)
 
-    x  = location_df['lon'].to_numpy(dtype=np.float32)
-    y  = location_df['lat'].to_numpy(dtype=np.float32)
+    lon  = location_df['lon'].to_numpy(dtype=np.float32)
+    lat  = location_df['lat'].to_numpy(dtype=np.float32)
+
+    m = Basemap(projection='merc',llcrnrlat= int(lat.min()),urcrnrlat= int(lat.max() +1 ),\
+                llcrnrlon= int(lon.min()),urcrnrlon= int(lon.max() +1),lat_ts= 20, resolution='i')
+
+    x, y = m(lon, lat)
 
     ## map species probabilities
-    fig = plt.figure()
-    plt.title(f"Species: {species_name}", fontsize=16)
-    plt.xlabel("Longitude", fontsize=14)
-    plt.ylabel("Latitude", fontsize=14)
-    sns.scatterplot(x=x, y=y, hue=probas, palette='mako', size=100, edgecolor='k')
+    plt.figure()
+    m.drawcoastlines(color='black', linewidth=0.5)
+    m.drawmapboundary(fill_color='white') 
+    m.fillcontinents(color='lightgray',lake_color='white', alpha=0.2)
+    # m.fillcontinents(color='#13090f',lake_color='white')
 
+    plt.title(f"Species: {species_name}", fontsize=16)
+    order = np.argsort(probas)
+    plt.scatter(x=x[order], y=y[order], c=np.log(probas[order]/(1- probas[order])), cmap='mako_r', s=5)
+    plt.colorbar(label='Probability logits')
+
+    grad = mpl.colormaps['mako_r'](np.linspace(0.4, 0.8, len(metrics)))
+
+    ## map true species presence
+    sol_df = p.read_csv(sol_path)
+    presence = np.zeros(len(surveys), dtype=bool)
+    for i in range(len(surveys)):
+        if str(species_idx) in sol_df.iloc[i, 1].split(' '):
+            presence[i] = True
+    print(np.sum(presence))
+    plt.figure()
+    m = Basemap(projection='merc',llcrnrlat= int(lat.min()),urcrnrlat= int(lat.max() +1 ),\
+                llcrnrlon= int(lon.min()),urcrnrlon= int(lon.max() +1),lat_ts= 20, resolution='i')
+    m.drawcoastlines(color='black', linewidth=0.5)
+    m.drawmapboundary(fill_color='white') 
+    m.fillcontinents(color='lightgray',lake_color='white', alpha=0.2)
+    plt.scatter(x=x[~presence], y=y[~presence], color = '#e2e2e2' , s=5)
+    plt.scatter(x=x[presence], y=y[presence], color = grad[-1], s=5)
+    plt.title(f"True Presence of {species_name}", fontsize=16)
 
     ## map predictions
 
-    for pred_file in list_pred:
+    plt.figure()
+    m = Basemap(projection='merc',llcrnrlat= int(lat.min()),urcrnrlat= int(lat.max() +1 ),\
+                llcrnrlon= int(lon.min()),urcrnrlon= int(lon.max() +1),lat_ts= 20, resolution='i')
+    m.drawcoastlines(color='black', linewidth=0.5)
+    m.drawmapboundary(fill_color='white') 
+    m.fillcontinents(color='lightgray',lake_color='white', alpha=0.2)
+
+    for idx in range(len(list_pred)):
+        pred_file = list_pred[- idx - 1]
         pred_df = p.read_csv(pred_file)
-        presence = np.zeros(len(surveys), dtype=bool)
-        val_mask = np.zeros(len(surveys), dtype=bool)
-        j = 0
-
+        pred = np.zeros(len(surveys), dtype=bool)
         for i in range(len(surveys)):
-            if surveys[i]== str(pred_df.iloc[j,0]):
-                if species_idx in pred_df.iloc[j,1].split(' '):
-                    presence[i] = True
-                j += 1
-            else :
-                val_mask[i] = True
-        
+            if surveys[i]== str(pred_df.iloc[i,0]):
+                if str(species_idx) in pred_df.iloc[i,1].split(' '):
+                    pred[i] = True
 
-        fig = plt.figure()
-        sns.scatterplot(x=x[~val_mask], y=y[~val_mask], hue=presence[~val_mask], palette='coolwarm', size=100, edgecolor='k')
-        sns.scatterplot(x=x[val_mask], y=y[val_mask], color='gray', size=100, edgecolor='k')
+
+        tp = pred * presence
+        fp = pred * ~presence
+        fn = ~pred * presence
+        print(np.sum(tp), np.sum(fp), np.sum(fn))
+        if idx == 0:
+            plt.scatter(x = x[~pred], y = y[~pred], color = '#e2e2e2', s=5, label='Absence')
+        plt.scatter(x = x[pred], y = y[pred], color = grad[idx], s=5, label=f'{metrics[-idx-1]} Predicted Presence')
+
+
     plt.show()
 
-map_species()
+def hill_numbers():
+    pred_base = 'submissions/predictions_rls_'
+    spec_file = 'data/rls_test_species.csv'
+    # train_file = 'data/rls_train_species.csv'
+    probas_file = 'data/rls_test_probas.csv'
+
+    hill_list = [0,1,2]
+    metrics = ['F1', 'F2']
+
+    list_pred = []
+    for metric in metrics:
+        pred_file = pred_base + f'{metric}.csv'
+        list_pred.append(pred_file)
+
+    sol = p.read_csv(spec_file)
+    surveys = p.read_csv(pred_file).drop(columns = 'speciesId')
+    sol = sol.merge(surveys, how = 'inner', on='surveyId')['speciesId'].to_numpy(dtype=str)
+
+    probas = p.read_csv(probas_file)
+    S, N = len(sol), probas.shape[1]
+
+    SOL = np.zeros((S,N), dtype = np.intp)
+    for i in range(S) :
+        r_sol = sol[i].split(' ')
+        for id in r_sol:
+            SOL[i,int(id)] = 1
+
+    FREQ = np.sum(SOL, axis = 0)/S
+    
+    HILL_T = np.zeros((len(hill_list), S))
+    for h in hill_list:
+        if h!= 1:
+            for site in range(S):
+                for species in range(N):
+                    if SOL[site, species] == 1:
+                        HILL_T[h, site] += FREQ[species]**h
+            HILL_T[h, :] = HILL_T[h, :]**(1/(1-h))
+        if h == 1:
+            for site in range(S):
+                for species in range(N):
+                    if SOL[site, species] == 1:
+                        HILL_T[h, site] -= np.log(FREQ[species])*FREQ[species]
+            HILL_T[h, :] = np.exp(HILL_T[h, :])
+
+    for i, pred_file in enumerate(list_pred):
+        pred_df = p.read_csv(pred_file)
+        PRED = np.zeros((S,N), dtype = np.intp)
+        for site in range(S) :
+            r_pred = pred_df.iloc[site,1].split(' ')
+            for id in r_pred:
+                PRED[site,int(id)] = 1
+
+        HILL_P = np.zeros((len(hill_list), S))
+        for h in hill_list:
+            if h!= 1:
+                for site in range(S):
+                    for species in range(N):
+                        if PRED[site, species] == 1:
+                            HILL_P[h, site] += FREQ[species]**h
+                HILL_P[h, :] = HILL_P[h, :]**(1/(1-h))
+            if h == 1:
+                for site in range(S):
+                    for species in range(N):
+                        if PRED[site, species] == 1 and FREQ[species] > 0:
+                            HILL_P[h, site] -= np.log(FREQ[species])*FREQ[species]
+                HILL_P[h, :] = np.exp(HILL_P[h, :])
+
+        R2 = 1 - (np.sum((HILL_T - HILL_P)**2, axis=1))/ np.sum(HILL_T**2, axis=1)
+        print(f"{metrics[i]} : R2 Hill numbers : {np.round(R2,3)}")
+
+
+hill_numbers()
+#map_species()
 #plot_calibration_curve()
 #plot_species_richness_all()
 #plot_aucs()
@@ -674,3 +792,4 @@ map_species()
 #plot_pred_sr()
 #plot_sr_fb()
 #plot_prev()
+#run_permutation_test()
