@@ -6,7 +6,7 @@ import numpy as np
 import pandas as p
 import seaborn as sns
 from scipy import stats
-from sklearn.metrics import r2_score,auc, precision_recall_curve, roc_curve
+from sklearn.metrics import f1_score, r2_score,auc, precision_recall_curve, roc_curve
 
 colors = ['#11999E', '#40514E', '#FFB22C']
 
@@ -17,8 +17,10 @@ def run_wmw_test():
         wmw, pvalue = stats.mannwhitneyu(score.iloc[:,0], score.iloc[:,i], alternative='greater')
         print(f"{names[0]} vs {names[i]}: WMW = {wmw}, p-value = {pvalue}")
 
+
 def statistic(x, y, axis):
     return np.mean(x, axis) - np.mean(y, axis)
+
 
 def run_permutation_test():
     score = p.read_csv("submissions/score_distrib.csv")
@@ -26,7 +28,6 @@ def run_permutation_test():
     for i in range(0, len(score.columns)-1):
         res = stats.permutation_test((score.iloc[:,-1], score.iloc[:,i]), statistic = statistic, vectorized=True, alternative='greater')
         print(f"{names[-1]} vs {names[i]}: S = {res.statistic}, p-value = {res.pvalue}")
-
 
 
 def plot_aucs():
@@ -152,25 +153,6 @@ def plot_score_distribution():
     plt.ylabel(ylabel)
     plt.grid()
     plt.show()
-
-
-def plot_nb_species():
-    title="Number of Species Difference"
-    xlabel="Decision functions"
-    ylabel="Delta from True"
-
-    nb_species = p.read_csv("submissions/nb_species.csv")
-    delta = nb_species - nb_species['True'].values[:, np.newaxis]
-    delta = delta.drop(columns = ['True'])
-
-    plt.figure(figsize=(10, 6))
-    sns.violinplot(data= delta, palette="muted")
-    plt.title(title)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    plt.grid()
-    plt.show()
-
 
 def plot_calibration_curve():
     title="Calibration Curve"
@@ -854,18 +836,16 @@ def plot_rich():
 
 
 def map_species():
-
-    species_idx = 112
-    sol_path = 'data/cleaned_GeoLifeCLEF_species.csv'
-    probas_path = 'data/cleaned_GeoLifeCLEF_probas.csv'
-    path_base = 'submissions/pred_GLC_tc_'
-    loc_path = 'data/GeoLifeCLEF_metadata_test.csv'
-    metrics = ['F1', 'F2','F3','F4','F5', 'F6', 'F7', 'F8', 'F9', 'F10']
-
     sol_path = 'data/cleaned_GeoLifeCLEF_tcalib.csv'
     probas_path = 'data/cleaned_GeoLifeCLEF_pcalib.csv'
     path_base = 'submissions/pred_GLC_train_'
     loc_path = 'data/GeoLifeCLEF_metadata_train.csv'
+    metrics = ['F1','F2']
+
+    sol_path = "data/rls_train_species.csv"
+    probas_path = "data/rls_train_probas.csv"
+    path_base = 'submissions/predictions_rls_train_'
+    loc_path = 'data/rls_metadata.csv'
     metrics = ['F1','F2']
 
     list_pred = []
@@ -875,8 +855,19 @@ def map_species():
     
     
     probas = p.read_csv(probas_path)
-    species_name = probas.columns[species_idx+1]
-    print(species_name)
+
+    # species_idx = 302
+    # species_name = probas.columns[species_idx+1]
+    # print(species_name)
+
+    species_name = "Carcharhinus amblyrhynchos"
+    species_name = "Urolophus kapalensis"
+    species_name = "Urolophus paucimaculatus"
+    # species_name = "Trygonoptera imitata" 
+    species_name = "Achoerodus viridis"
+
+    species_idx = probas.columns.to_list().index(species_name) -1
+    print(species_idx)
 
     surveys = probas['surveyId'].to_numpy(dtype=str)
     location_df = p.read_csv(loc_path)
@@ -901,7 +892,7 @@ def map_species():
 
     plt.title(f"Species: {species_name}", fontsize=16)
     order = np.argsort(probas)
-    plt.scatter(x=x[order], y=y[order], c=np.log(probas[order]/(1- probas[order])), cmap='mako_r', s= 5)
+    plt.scatter(x=x[order], y=y[order], c=np.log(probas[order]/(1- probas[order])), cmap='mako_r', s= 20)
     plt.colorbar(label='Probability logits')
     plt.tight_layout()
     plt.savefig(f'figures/map_probas.svg')
@@ -913,8 +904,10 @@ def map_species():
     sol_df = p.read_csv(sol_path)
     presence = np.zeros(len(surveys), dtype=bool)
     for i in range(len(surveys)):
-        if str(species_idx) in sol_df.iloc[i, 1].split(' '):
-            presence[i] = True
+        spec = str(sol_df.iloc[i,1]).split(' ')
+        if spec[0] != 'nan':
+            if str(species_idx) in spec:
+                presence[i] = True
     print(np.sum(presence))
     plt.figure()
     m = Basemap(projection='merc',llcrnrlat= int(lat.min()),urcrnrlat= int(lat.max() +1 ),\
@@ -922,8 +915,8 @@ def map_species():
     m.drawcoastlines(color='black', linewidth=0.5)
     m.drawmapboundary(fill_color='white') 
     m.fillcontinents(color='lightgray',lake_color='white', alpha=0.2)
-    plt.scatter(x=x[~presence], y=y[~presence], color = '#e2e2e2' , s=5)
-    plt.scatter(x=x[presence], y=y[presence], color = grad[-1], s=5)
+    plt.scatter(x=x[~presence], y=y[~presence], color = '#e2e2e2' , s=20)
+    plt.scatter(x=x[presence], y=y[presence], color = grad[-1], s=20)
     plt.title(f"True Presence of {species_name}", fontsize=16)
     plt.tight_layout()
     plt.savefig(f'figures/map_true.svg')
@@ -954,115 +947,162 @@ def map_species():
         fn = ~pred * presence
         print(np.sum(tp), np.sum(fp), np.sum(fn))
         if idx == 0:
-            plt.scatter(x = x[~pred], y = y[~pred], color = '#e2e2e2', s= 5, label='Absence')
+            plt.scatter(x = x[~pred], y = y[~pred], color = '#e2e2e2', s= 20, label='Absence')
 
         if idx == 0:
-            plt.scatter(x = x[pred], y = y[pred], color = colors[2], s=5, label=f'{metrics[-idx-1]} Predicted Presence')
+            plt.scatter(x = x[pred], y = y[pred], color = colors[2], s=20, label=f'{metrics[-idx-1]} Predicted Presence')
         else:
-            plt.scatter(x = x[pred], y = y[pred], color = grad[idx], s=5, label=f'{metrics[-idx-1]} Predicted Presence')
+            plt.scatter(x = x[pred], y = y[pred], color = grad[idx], s=20, label=f'{metrics[-idx-1]} Predicted Presence')
     plt.tight_layout()
     plt.savefig(f'figures/map_pred.svg')
 
     plt.show()
 
-def hill_numbers():
-    pred_base = 'submissions/predictions_rls_'
-    spec_file = 'data/rls_test_species.csv'
-    probas_file = 'data/rls_test_probas.csv'
 
 
-    pred_base = 'submissions/pred_GLC_tc_'
-    spec_file = 'data/cleaned_GeoLifeCLEF_species.csv'
-    probas_file = 'data/cleaned_GeoLifeCLEF_probas.csv'
+def map_iucn():
 
-    hill_list = [0,1,2]
-    metrics = ['F1', 'F2']
+    sol_path = "data/rls_train_species.csv"
+    iucn_file = "data/rls_traits.csv"
+    probas_path = "data/rls_train_probas.csv"
+    path_base = 'submissions/predictions_rls_train_'
+    loc_path = 'data/rls_metadata.csv'
+    metrics = ['F1','F2']
 
     list_pred = []
     for metric in metrics:
-        pred_file = pred_base + f'{metric}.csv'
-        list_pred.append(pred_file)
-
-    sol = p.read_csv(spec_file)
-    surveys = p.read_csv(pred_file).drop(columns = 'speciesId')
-    sol = sol.merge(surveys, how = 'right', on='surveyId')['speciesId'].to_numpy(dtype=str)
-
-    probas = p.read_csv(probas_file)
-    probas = probas.merge(surveys, how = 'right', on='surveyId').drop(columns = 'surveyId').to_numpy(dtype=np.float32)
+        fname = f"{path_base}{metric}.csv"
+        list_pred.append(fname)
 
 
-    S, N = probas.shape
-    SOL = np.zeros((S,N), dtype = np.intp)
-    for i in range(S) :
-        r_sol = sol[i].split(' ')
-        for id in r_sol:
-            SOL[i,int(id)] = 1
-    
+    iucn = p.read_csv(iucn_file)[['rls_species_name','IUCN_category']].to_numpy(dtype=str)
+    status = {"LC":0, "NT":1, "VU":2, "EN":3, "CR":4, "EW":5, "EX":6}
+    probas = p.read_csv(probas_path)
+    spec_name = probas.columns[1:]    
 
-    FREQ = np.sum(SOL, axis = 0)/S
-    
-    HILL_T = np.zeros((len(hill_list), S))
-    for h in range(len(hill_list)):
-        if hill_list[h] != 1:
-            for site in range(S):
-                for species in range(N):
-                    if SOL[site, species] == 1:
-                        HILL_T[h, site] += FREQ[species]**hill_list[h]
-            #HILL_T[h, :] = HILL_T[h, :]**(1/(1-h))
-        else :
-            for site in range(S):
-                for species in range(N):
-                    if SOL[site, species] == 1 and FREQ[species] > 0:
-                        HILL_T[h, site] -= np.log(FREQ[species])*FREQ[species]
-            #HILL_T[h, :] = np.exp(HILL_T[h, :])
+    spec_iucn = np.ones_like(spec_name, dtype=int) * -1
+    for i in range(len(spec_name)):
+        index = np.where(iucn[:,0] == spec_name[i])[0]
+        if len(index) == 0 :
+            print(f"Species {spec_name[i]} not found")
+        else:
+            if iucn[index[0],1] in status.keys():
+                spec_iucn[i] = status[iucn[index[0],1]]
 
-    for i, pred_file in enumerate(list_pred):
-        R2 = []
-        pred_df = p.read_csv(pred_file)
-        pred_df = pred_df['speciesId'].to_numpy(dtype=str)
-        PRED = np.zeros((S,N), dtype = np.intp)
-        for site in range(S) :
-            r_pred = pred_df[site].split(' ')
-            for id in r_pred:
-                PRED[site,int(id)] = 1
+    surveys = probas['surveyId'].to_numpy(dtype=str)
+    location_df = p.read_csv(loc_path)
+    location_df = location_df.groupby('surveyId').first().reset_index()
+    location_df = probas.merge(location_df,how = "left", on='surveyId')[['lon', 'lat','site_code']]
+    probas = probas.iloc[:, 1:].to_numpy(dtype=np.float32)
 
-        HILL_P = np.zeros((len(hill_list), S))
 
-        for h in range(len(hill_list)):
-            if hill_list[h] != 1:
-                for site in range(S):
-                    for species in range(N):
-                        if PRED[site, species] == 1:
-                            HILL_P[h, site] += FREQ[species]**hill_list[h]
+    # Group by site_code
+    site_groups = location_df.groupby('site_code')
+    site_lon = site_groups['lon'].mean().to_numpy(dtype=np.float32)
+    site_lat = site_groups['lat'].mean().to_numpy(dtype=np.float32)
+    site_codes = site_groups.groups.keys()
+    print(len(site_codes))
+    m = Basemap(projection='merc',llcrnrlat= int(site_lat.min()),urcrnrlat= int(site_lat.max() +1 ),\
+                llcrnrlon= int(site_lon.min()),urcrnrlon= int(site_lon.max() +1),lat_ts= 20, resolution='i')
 
-                #HILL_P[h, :] = HILL_P[h, :]**(1/(1-h))
-            
-            else:
-                for site in range(S):
-                    for species in range(N):
-                        if PRED[site, species] == 1 and FREQ[species] > 0:
-                            HILL_P[h, site] -= np.log(FREQ[species])*FREQ[species]
-                #HILL_P[h, :] = np.exp(HILL_P[h, :])
+    x, y = m(site_lon, site_lat)
 
-            plt.figure(figsize=(10, 10))
-            plt.scatter(HILL_T[h,:],HILL_P[h,:])
-            M = max(HILL_T[h,:].max(), HILL_P[h,:].max())
-            plt.plot((0, M),(0,M), c = 'gray', linewidth = 1)
-            plt.xlabel("HILL_T")
-            plt.ylabel("HILL_P")
-            plt.title(f"Hill Numbers - {metrics[i]} - h={hill_list[h]}")
-            plt.grid()
-            plt.tight_layout()
-            R2.append(r2_score(HILL_T[h,:], HILL_P[h,:]))
-        R2 = np.round(R2,3)
+    grad = mpl.colormaps['mako_r'](np.linspace(0, 1, 5))
 
-        print(f"{metrics[i]} : R2 Hill numbers : {R2}")
+    ## map true species presence
+    sol_df = p.read_csv(sol_path)["speciesId"]
+    site_iucn = np.ones(len(site_codes), dtype=int) * -1
+    for i, site in enumerate(site_codes):
+        for spec in sol_df[location_df['site_code'] == site] :
+            if str(spec) != 'nan':
+                spec  = spec.split(' ')
+                for s in spec:
+                    site_iucn[i] = max(site_iucn[i], spec_iucn[int(s)])
+
+
+    plt.figure()
+
+
+    m.drawcoastlines(color='black', linewidth=0.5)
+    m.drawmapboundary(fill_color='white') 
+    m.fillcontinents(color='lightgray',lake_color='white', alpha=0.2)
+    plt.scatter(x[site_iucn == -1], y[site_iucn == -1], color = grad[0], s=30)
+    for i in range(5):
+        plt.scatter(x[site_iucn == i], y[site_iucn == i], color = grad[i], s=30, label=list(status.keys())[i])
+    # plt.title(f"Worst IUCN status observed", fontsize=16)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(f'figures/icun_true.svg')
+
+
+
+    ## map predictions
+    pred_iuc  = []
+    for idx in range(len(list_pred)):
+
+        plt.figure()
+        m = Basemap(projection='merc',llcrnrlat= int(site_lat.min()),urcrnrlat= int(site_lat.max() +1 ),\
+                    llcrnrlon= int(site_lon.min()),urcrnrlon= int(site_lon.max() +1),lat_ts= 20, resolution='i')
+
+        m.drawcoastlines(color='black', linewidth=0.5)
+        m.drawmapboundary(fill_color='white') 
+        m.fillcontinents(color='lightgray',lake_color='white', alpha=0.2)
+
+        pred_file = list_pred[idx]
+        pred_df = p.read_csv(pred_file)["speciesId"]
+        site_iucn = np.ones(len(site_codes), dtype=int) * -1
+        for i, site in enumerate(site_codes):
+            for spec in pred_df[location_df['site_code'] == site] :
+                if str(spec) != 'nan':
+                    spec  = spec.split(' ')
+                    for s in spec:
+                        site_iucn[i] = max(site_iucn[i], spec_iucn[int(s)])
+
+
+        plt.scatter(x[site_iucn == -1], y[site_iucn == -1], color = grad[0], s=30)
+        for i in range(5):
+            plt.scatter(x[site_iucn == i], y[site_iucn == i], color = grad[i], s=30, label=list(status.keys())[i])
+        # plt.title(f"Worst IUCN status predicted with {metrics[idx]}", fontsize=16)
+        plt.tight_layout()
+        plt.legend()
+        plt.savefig(f'figures/icun_{metrics[idx]}.svg')
+        pred_iuc.append(site_iucn)
+
+    ## difference between predictions
+    plt.figure()
+    m = Basemap(projection='merc',llcrnrlat= int(site_lat.min()),urcrnrlat= int(site_lat.max() +1 ),\
+                llcrnrlon= int(site_lon.min()),urcrnrlon= int(site_lon.max() +1),lat_ts= 20, resolution='i')
+    m.drawcoastlines(color='black', linewidth=0.5)
+    m.drawmapboundary(fill_color='white')
+    m.fillcontinents(color='lightgray',lake_color='white', alpha=0.2)
+    site_iucn = pred_iuc[1] - pred_iuc[0]
+    plt.scatter(x[site_iucn == 0], y[site_iucn == 0], color = '#e2e2e2', s=30, label='No status change')
+    plt.scatter(x[site_iucn > 0], y[site_iucn > 0], color = colors[0], s=30, label='More threatened status with F2')
+    plt.legend()
+
+    # plt.title(f"Difference between predictions", fontsize=16)
+    plt.tight_layout()
+    plt.savefig(f'figures/icun_diff.svg')
+
     plt.show()
 
 
 
 
+
+
+
 def plot_prev():
+
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+        "font.serif": ["Computer Modern Roman"],
+        "axes.labelsize": 24,
+        "legend.fontsize": 14,
+        "xtick.labelsize": 14,
+        "ytick.labelsize": 14,
+    })
 
     train_file = 'data/rls_train_species.csv'
     calib_file = 'data/rls_train_probas.csv'
@@ -1122,16 +1162,18 @@ def plot_prev():
     sns.scatterplot(x=T, y=Ytr1, s=20, color = "#39366b", legend=False, linewidth=0, alpha = 0.5)
     sns.lineplot(x=[0, B], y=[0, B],color= colors[2])
 
-    plt.title( "Predicted train prevalence F1 versus Train prevalence \n R2log : " + str(round(r2_score(np.log(T), np.log(Ytr1)),2)) \
-              + ", R2 : " + str(round(r2_score(T, Ytr1),2)), fontsize = 18)
-    plt.xlabel("Train prevalence (log scale)", fontsize = 14)
-    plt.ylabel("Predicted prevalence (log scale)", fontsize = 14)
+    # plt.title( "Predicted train prevalence F1 versus Train prevalence \n R2log : " + str(round(r2_score(np.log(T), np.log(Ytr1)),2)) \
+            #   + ", R2 : " + str(round(r2_score(T, Ytr1),2)), fontsize = 18)
+    plt.xlabel("Train prevalence (log scale)",)
+    plt.ylabel("Predicted prevalence (log scale)")
     plt.gca().set_aspect('equal')
     plt.xlim(1/Str, B)
     plt.ylim(1/Str, B)
     plt.xscale('log')
     plt.yscale('log')
     plt.grid(linewidth = 1)
+    plt.tight_layout()
+    plt.savefig('figures/prev_f1.svg')
 
 
 
@@ -1153,10 +1195,11 @@ def plot_prev():
     ax1.scatter(x= T, y= Ytr/Ytr1, s=20, c= Hue2, cmap='mako_r', linewidth=0, alpha = 0.5)
     ax1.plot([1, 0], [1, B],color= colors[2])
     ax1.set_xlim(1/Str/1.1, B*1.1)
-    ax1.set_ylabel("F2", fontsize = 14)
+    ax1.set_ylabel("F2", fontsize = 24)
     vals = ax1.get_yticks()
-    ax1.set_yticklabels(['+{:.0%}'.format(x) for x in vals])
-    # ax1.set_ylim(0.001, 1000)
+    ax1.set_yticks(vals)
+    ax1.set_yticklabels([r"+{:.0f}\%".format((x-1)*100) for x in vals])
+    ax1.set_ylim(0.5, 8)
 
     ax1.set_xscale('log')
     # ax1.set_yscale('log')
@@ -1179,10 +1222,11 @@ def plot_prev():
     ax2.plot([1, 0], [1, B],color= colors[2])
 
     ax2.set_xlim(1/Str/1.1, B*1.1)
-    ax2.set_ylabel("J", fontsize = 14)
-    # ax2.set_ylim(0.01, 10000)
+    ax2.set_ylabel("J", fontsize = 24)
+    ax2.set_ylim(0.5, 1.1)
     vals = ax2.get_yticks()
-    ax2.set_yticklabels(['-{:.0%}'.format(1-x) for x in vals])
+    ax2.set_yticks(vals)
+    ax2.set_yticklabels([r'-{:.0f}\%'.format((1-x)*100) for x in vals])
 
     ax2.set_xscale('log')
     # ax2.set_yscale('log')
@@ -1205,21 +1249,24 @@ def plot_prev():
     ax3.plot([1, 0], [1, B],color= colors[2])
 
     ax3.set_xlim(1/Str/1.1, B*1.1)
-    ax3.set_ylabel("TSS", fontsize = 14)    
-    # ax3.set_ylim(0.01, 10000)
+    ax3.set_ylabel("TSS", fontsize = 24)    
+    ax3.set_ylim(1, 1000)
 
     ax3.set_xscale('log')
     ax3.set_yscale('log')
     ax3.grid(linewidth = 1)
-    ax3.set_xlabel("Prevalence (log scale)", fontsize = 14)
+    ax3.set_xlabel("Prevalence (log scale)", fontsize = 24)
     vals = ax3.get_yticks()
-    ax3.set_yticklabels(['x{:}'.format(x) for x in vals])
-
-    fig.suptitle("Change in predicted prevalence for different metric \n compared to F1 in function of species prevalence", fontsize = 18)
+    ax3.set_yticks(vals)
+    ax3.set_yticklabels([r'x{:}'.format(x) for x in vals])
+    plt.tight_layout()
+    plt.savefig('figures/prev_comp.svg')
+    # fig.suptitle("Change in predicted prevalence for different metric \n compared to F1 in function of species prevalence", fontsize = 18)
     plt.show()
 
 
 #hill_numbers()
+map_iucn()
 #map_species()
 #plot_calibration_curve()
 #plot_species_richness_all()
@@ -1227,6 +1274,7 @@ def plot_prev():
 #plot_species_richness()
 #plot_pred_sr()
 #plot_sr_fb()
-plot_prev()
+# plot_score_distribution()
+# plot_prev()
 #plot_rich()
 #run_permutation_test()
